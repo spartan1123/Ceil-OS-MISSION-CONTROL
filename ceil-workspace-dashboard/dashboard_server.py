@@ -22,6 +22,7 @@ if str(CURRENT_DIR) not in sys.path:
 
 from council_events import CouncilEventBus
 from council_orchestrator import CouncilOrchestrator
+from council_storage import CouncilArtifactStore
 
 
 def parse_allowed_gateway_ports(raw: str | None) -> set[int]:
@@ -50,6 +51,7 @@ DEFAULT_PORT = 45680
 DEFAULT_DIRECTORY = "/root/.openclaw/workspace/ceil-workspace-dashboard"
 DEFAULT_CONFIG_PATH = "/root/.openclaw/openclaw.json"
 DEFAULT_TOOLS_URL = "http://127.0.0.1:18789/tools/invoke"
+DEFAULT_COUNCIL_ARTIFACT_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.council-artifacts"
 DEFAULT_ALLOWED_GATEWAY_PORTS = {18789, 19001, 19011, 19021, 19031, 19041, 19051, 19061, 19071, 19081, 19091, 19101, 19111}
 DEFAULT_PORT_CONFIG_MAP = {
     19001: "/root/.openclaw/instances/workspace-manager.json",
@@ -503,6 +505,11 @@ def main() -> int:
         default=os.getenv("DASHBOARD_ALLOWED_GATEWAY_PORTS", ""),
         help="Comma-separated gateway ports allowed for proxy forwarding.",
     )
+    parser.add_argument(
+        "--council-artifact-path",
+        default=os.getenv("DASHBOARD_COUNCIL_ARTIFACT_PATH", DEFAULT_COUNCIL_ARTIFACT_PATH),
+        help="Directory for persisted council decision/action artifacts.",
+    )
     args = parser.parse_args()
 
     try:
@@ -523,6 +530,7 @@ def main() -> int:
         token_for_port=lambda port: load_gateway_token(find_config_for_port(args.config, port)),
         port_for_slug=lambda slug: next((candidate_port for candidate_port, path in DEFAULT_PORT_CONFIG_MAP.items() if Path(path).stem == slug), 18789),
         participant_slug_map=DEFAULT_PARTICIPANT_TO_SLUG,
+        artifact_store=CouncilArtifactStore(args.council_artifact_path),
     )
 
     print(f"Dashboard server listening on http://{args.bind}:{args.port} (dir={args.directory})")

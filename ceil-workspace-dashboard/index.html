@@ -2369,6 +2369,7 @@
           weekTotalCount: 0,
           weekSuccessCount: 0,
           resolveAgentFromLogName,
+          isCountableTask,
         });
 
         if (!supabaseClient) {
@@ -2394,6 +2395,7 @@
             weekTotalCount: weekTotalRes.count || 0,
             weekSuccessCount: weekSuccessRes.count || 0,
             resolveAgentFromLogName,
+            isCountableTask,
           });
 
           renderOrg(orgChart.statsByName, orgChart.metrics);
@@ -3302,6 +3304,32 @@
             agent_slug: payload.agent_slug || "system",
             role: payload.role || "system",
             content: payload.content || "",
+            created_at: payload.created_at || event.created_at || nowIso(),
+          });
+        }
+
+        if (event.type === "round.status") {
+          const payload = event.payload || {};
+          appendLocalMessage({
+            id: event.id || generateUuid(),
+            run_id: runId,
+            agent_slug: "system",
+            role: "system",
+            content: `[round:${payload.round || "unknown"}] ${payload.state || "updated"}${payload.details ? ` — ${payload.details}` : ""}`,
+            created_at: payload.created_at || event.created_at || nowIso(),
+          });
+        }
+
+        if (event.type === "artifact.persisted") {
+          const payload = event.payload || {};
+          appendLocalMessage({
+            id: event.id || generateUuid(),
+            run_id: runId,
+            agent_slug: "system",
+            role: "system",
+            content: payload.status === "persisted"
+              ? `Artifact persisted at ${payload.path || "(unknown path)"}`
+              : `Artifact persistence ${payload.status || "skipped"}${payload.error ? `: ${payload.error}` : ""}`,
             created_at: payload.created_at || event.created_at || nowIso(),
           });
         }

@@ -32,12 +32,21 @@ def participant_display(slug_or_name: str, participant_map: dict[str, str]) -> s
 
 
 class CouncilOrchestrator:
-    def __init__(self, event_bus, tools_url_for_port: Callable[[int], str], token_for_port: Callable[[int], str], port_for_slug: Callable[[str], int], participant_slug_map: dict[str, str]) -> None:
+    def __init__(
+        self,
+        event_bus,
+        tools_url_for_port: Callable[[int], str],
+        token_for_port: Callable[[int], str],
+        port_for_slug: Callable[[str], int],
+        participant_slug_map: dict[str, str],
+        artifact_store=None,
+    ) -> None:
         self.event_bus = event_bus
         self.tools_url_for_port = tools_url_for_port
         self.token_for_port = token_for_port
         self.port_for_slug = port_for_slug
         self.participant_slug_map = participant_slug_map
+        self.artifact_store = artifact_store
         self._threads: dict[str, threading.Thread] = {}
 
     def start_run(self, run_id: str) -> None:
@@ -92,14 +101,13 @@ class CouncilOrchestrator:
         return ""
 
     def _spawn_session(self, slug: str, port: int) -> str:
-        label = slug
         task = (
             f"You are {slug}. Join this council session and wait for prompts. "
             "Reply concisely, clearly, and with actionable reasoning when asked."
         )
         self._invoke_tool(port, "sessions_spawn", {
             "task": task,
-            "label": label,
+            "label": slug,
             "runtime": "subagent",
             "agentId": slug,
             "mode": "session",
@@ -123,24 +131,6 @@ class CouncilOrchestrator:
             "timeoutSeconds": 300,
         })
 
-    def _build_prompt(self, session_payload: dict[str, Any], target_slug: str, participants: list[str], history: list[dict[str, str]]) -> str:
-        history_text = ""
-        if history:
-            history_text = "\n\n--- PREVIOUS COUNCIL CONTRIBUTIONS ---\n" + "\n\n".join(
-                f"[{item['speaker']}]: {item['text']}" for item in history
-            ) + "\n--- END OF CONTRIBUTIONS ---\n"
-
-        return "\n".join([
-            f"Council Run ID: {session_payload.get('last_run_id') or session_payload.get('run_id')}",
-            f"Session Title: {session_payload.get('title') or 'Council Session'}",
-            f"Topic: {session_payload.get('topic') or session_payload.get('notes') or 'No topic provided.'}",
-            f"Participants: {', '.join(participant_display(slug, self.participant_slug_map) for slug in participants)}",
-            f"Target Agent: {target_slug}",
-            f"Notes: {session_payload.get('notes') or 'No additional notes.'}",
-            history_text,
-            "Please review the contributions above (if any) and provide your perspective. Respond with your actionable contribution and one clear next action.",
-        ])
-
     def _publish_message(self, run_id: str, agent_slug: str, role: str, content: str) -> None:
         self.event_bus.publish(run_id, "message", {
             "run_id": run_id,
@@ -161,38 +151,95 @@ class CouncilOrchestrator:
             "created_at": now_iso(),
         })
 
-    def _run(self, run_id: str) -> None:
-        state = self.event_bus.get_run(run_id)
-        if not state:
+    def _publish_round(self, run_id: str, round_key: str, state: str, details: str = "") -> None:
+        self.event_bus.publish(run_id, "round.status", {
+            "run_id": run_id,
+            "round": round_key,
+            "state": state,
+            "details": details,
+            "created_at": now_iso(),
+        })
+
+    def _build_round_prompt(
+        self,
+        session_payload: dict[str, Any],
+        target_slug: str,
+        participants: list[str],
+        round_key: str,
+        context_packet: str,
+        proposal_notes: list[dict[str, str]],
+        critique_notes: list[dict[str, str]],
+    ) -> str:
+        header = [
+            f"Council Run ID: {session_payload.get('run_id')}",
+            f"Session Title: {session_payload.get('title') or 'Council Session'}",
+            f"Topic: {session_payload.get('topic') or session_payload.get('notes') or 'No topic provided.'}",
+            f"Participants: {', '.join(participant_display(slug, self.participant_slug_map) for slug in participants)}",
+            f"Target Agent: {target_slug}",
+            f"Round: {round_key}",
+            "",
+            "CONTEXT PACKET:",
+            context_packet,
+        ]
+
+        if proposal_notes:
+            header.append("\nPROPOSALS:")
+            header.extend([f"- [{item['speaker']}] {item['text']}" for item in proposal_notes])
+        if critique_notes:
+            header.append("\nCRITIQUES / CROSS-CHECKS:")
+            header.extend([f"- [{item['speaker']}] {item['text']}" for item in critique_notes])
+
+        if round_key == "proposal":
+            footer = "Provide your proposal with rationale, constraints, and one concrete implementation step."
+        elif round_key == "critique":
+            footer = "Critique existing proposals. Cross-check for risks, assumptions, and missing evidence."
+        else:
+            footer = "Synthesize the council discussion into a final recommendation with explicit next actions."
+
+        return "\n".join(header + ["", footer])
+
+    def _persist_artifact(self, run_id: str, artifact: dict[str, Any]) -> None:
+        if not self.artifact_store:
+            self.event_bus.publish(run_id, "artifact.persisted", {
+                "run_id": run_id,
+                "status": "skipped",
+                "reason": "artifact_store_not_configured",
+                "created_at": now_iso(),
+            })
             return
 
-        payload = dict(state.payload)
-        participants = [slugify(item) for item in payload.get("participants", []) if slugify(item)]
-        payload["participants"] = participants
-        payload["run_id"] = run_id
-        payload["last_run_id"] = run_id
-        failed_agents: list[dict[str, Any]] = []
-        success_count = 0
-        history: list[dict[str, str]] = []
+        result = self.artifact_store.persist_artifact(run_id, artifact)
+        payload = {
+            "run_id": run_id,
+            "status": "persisted" if result.get("ok") else "failed",
+            "path": result.get("path"),
+            "error": result.get("error"),
+            "created_at": now_iso(),
+        }
+        self.event_bus.publish(run_id, "artifact.persisted", payload)
 
-        self.event_bus.update_status(run_id, "running", now_iso())
-        self._publish_message(run_id, "system", "system", f"Council topic: {payload.get('topic') or payload.get('notes') or 'No topic provided.'}")
-        self._publish_message(run_id, "system", "system", "Council run started.")
+    def _run_round(
+        self,
+        run_id: str,
+        payload: dict[str, Any],
+        participants: list[str],
+        round_key: str,
+        context_packet: str,
+        proposal_notes: list[dict[str, str]],
+        critique_notes: list[dict[str, str]],
+        failed_agents: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, str]], int, bool]:
+        self._publish_round(run_id, round_key, "started", f"Running {round_key} round")
+        outputs: list[dict[str, str]] = []
+        success_count = 0
 
         for slug in participants:
             current = self.event_bus.get_run(run_id)
             if not current:
-                return
+                return outputs, success_count, True
             if current.stop_requested:
-                self._publish_message(run_id, "system", "system", "Council run stopped by user.")
-                self.event_bus.update_status(run_id, "stopped", now_iso(), {
-                    "error": {
-                        "failed_agents": failed_agents,
-                        "success_count": success_count,
-                        "failure_count": len(failed_agents),
-                    }
-                })
-                return
+                self._publish_round(run_id, round_key, "stopped", "Run stopped by user")
+                return outputs, success_count, True
 
             port = self.port_for_slug(slug)
             self._publish_participant(run_id, slug, "connecting", f"Preparing runtime on port {port}")
@@ -207,17 +254,16 @@ class CouncilOrchestrator:
                     "agent_slug": slug,
                     "port": port,
                     "tool": "sessions_spawn",
+                    "round": round_key,
                     "error_type": "session_not_found",
                     "message": f"Unable to create or bind a thread for {slug}",
                 }
                 failed_agents.append(failure)
                 self._publish_participant(run_id, slug, "failed", failure["message"])
-                self._publish_message(run_id, slug, "system", f"Dispatch skipped/failed for {slug} (sessions_spawn@{port}): {failure['message']}")
                 continue
 
-            self._publish_participant(run_id, slug, "connected", "Session ready.", session_key=session_key)
-            prompt = self._build_prompt(payload, slug, participants, history)
-            self._publish_participant(run_id, slug, "speaking", "Prompt dispatched.", session_key=session_key)
+            prompt = self._build_round_prompt(payload, slug, participants, round_key, context_packet, proposal_notes, critique_notes)
+            self._publish_participant(run_id, slug, "speaking", f"{round_key} prompt dispatched.", session_key=session_key)
 
             try:
                 result = self._send_message(port, session_key, prompt)
@@ -226,48 +272,116 @@ class CouncilOrchestrator:
                     "agent_slug": slug,
                     "port": port,
                     "tool": "sessions_send",
+                    "round": round_key,
                     "error_type": "other",
                     "message": str(exc),
                 }
                 failed_agents.append(failure)
                 self._publish_participant(run_id, slug, "failed", failure["message"], session_key=session_key)
-                self._publish_message(run_id, slug, "system", f"Dispatch skipped/failed for {slug} (sessions_send@{port}): {failure['message']}")
                 continue
 
             detail_status = str(result.get("details", {}).get("status") or result.get("status") or "").lower()
             if detail_status in {"error", "forbidden", "timeout"}:
-                message = result.get("details", {}).get("error") or result.get("error") or f"dispatch returned status={detail_status}"
                 failure = {
                     "agent_slug": slug,
                     "port": port,
                     "tool": "sessions_send",
+                    "round": round_key,
                     "error_type": detail_status or "other",
-                    "message": str(message),
+                    "message": str(result.get("details", {}).get("error") or result.get("error") or f"dispatch returned status={detail_status}"),
                 }
                 failed_agents.append(failure)
                 self._publish_participant(run_id, slug, "failed", failure["message"], session_key=session_key)
-                self._publish_message(run_id, slug, "system", f"Dispatch skipped/failed for {slug} (sessions_send@{port}): {failure['message']}")
                 continue
 
-            reply = result.get("details", {}).get("reply")
-            if not reply:
-                reply = json.dumps(result, ensure_ascii=False)
+            reply = result.get("details", {}).get("reply") or json.dumps(result, ensure_ascii=False)
             success_count += 1
-            history.append({"speaker": participant_display(slug, self.participant_slug_map), "text": str(reply)})
-            self._publish_participant(run_id, slug, "completed", "Contribution received.", session_key=session_key)
+            outputs.append({
+                "speaker": participant_display(slug, self.participant_slug_map),
+                "slug": slug,
+                "text": str(reply),
+            })
+            self._publish_participant(run_id, slug, "completed", f"{round_key} contribution received.", session_key=session_key)
             self._publish_message(run_id, slug, "agent", str(reply))
 
-        status = "failed" if success_count == 0 else "completed"
+        self._publish_round(run_id, round_key, "completed", f"{round_key} round finished with {success_count} contribution(s)")
+        return outputs, success_count, False
+
+    def _run(self, run_id: str) -> None:
+        state = self.event_bus.get_run(run_id)
+        if not state:
+            return
+
+        payload = dict(state.payload)
+        participants = [slugify(item) for item in payload.get("participants", []) if slugify(item)]
+        payload["participants"] = participants
+        payload["run_id"] = run_id
+
+        failed_agents: list[dict[str, Any]] = []
+        total_success = 0
+
+        self.event_bus.update_status(run_id, "running", now_iso())
+        topic = payload.get("topic") or payload.get("notes") or "No topic provided."
+        context_packet = (
+            f"Objective: {topic}\n"
+            f"Participants: {', '.join(participant_display(slug, self.participant_slug_map) for slug in participants)}\n"
+            "Protocol: proposal -> critique/cross-check -> synthesis/decision."
+        )
+
+        self._publish_message(run_id, "system", "system", f"Council topic: {topic}")
+        self._publish_round(run_id, "context", "published", "Context packet generated")
+        self._publish_message(run_id, "system", "system", f"Context packet:\n{context_packet}")
+
+        proposal_notes, proposal_success, stopped = self._run_round(
+            run_id, payload, participants, "proposal", context_packet, [], [], failed_agents
+        )
+        total_success += proposal_success
+        if stopped:
+            self.event_bus.update_status(run_id, "stopped", now_iso(), {"error": {"failed_agents": failed_agents, "success_count": total_success, "failure_count": len(failed_agents)}})
+            return
+
+        critique_notes, critique_success, stopped = self._run_round(
+            run_id, payload, participants, "critique", context_packet, proposal_notes, [], failed_agents
+        )
+        total_success += critique_success
+        if stopped:
+            self.event_bus.update_status(run_id, "stopped", now_iso(), {"error": {"failed_agents": failed_agents, "success_count": total_success, "failure_count": len(failed_agents)}})
+            return
+
+        synthesis_notes, synthesis_success, stopped = self._run_round(
+            run_id, payload, participants, "synthesis", context_packet, proposal_notes, critique_notes, failed_agents
+        )
+        total_success += synthesis_success
+        if stopped:
+            self.event_bus.update_status(run_id, "stopped", now_iso(), {"error": {"failed_agents": failed_agents, "success_count": total_success, "failure_count": len(failed_agents)}})
+            return
+
+        final_decision = synthesis_notes[-1]["text"] if synthesis_notes else "No synthesis response provided."
+        artifact = {
+            "session_id": state.session_id,
+            "topic": topic,
+            "context_packet": context_packet,
+            "proposals": proposal_notes,
+            "critiques": critique_notes,
+            "synthesis": synthesis_notes,
+            "final_decision": final_decision,
+            "failed_agents": failed_agents,
+            "success_count": total_success,
+            "failure_count": len(failed_agents),
+            "completed_at": now_iso(),
+        }
+        self._persist_artifact(run_id, artifact)
+
+        status = "failed" if total_success == 0 else "completed"
         error = {
             "failed_agents": failed_agents,
-            "success_count": success_count,
+            "success_count": total_success,
             "failure_count": len(failed_agents),
         } if failed_agents or status == "failed" else None
 
         if status == "completed":
-            summary = f"Council run completed with {len(failed_agents)} dispatch issue(s)." if failed_agents else "Council run completed."
-            self._publish_message(run_id, "system", "system", summary)
+            self._publish_message(run_id, "system", "system", f"Final decision: {final_decision}")
         else:
             self._publish_message(run_id, "system", "system", "Council run failed: no participants responded.")
 
-        self.event_bus.update_status(run_id, status, now_iso(), {"error": error})
+        self.event_bus.update_status(run_id, status, now_iso(), {"error": error, "artifact": artifact})

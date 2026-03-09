@@ -8,11 +8,18 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "dashboard_server.py"
+BASE_DIR = Path(__file__).resolve().parents[1]
+MODULE_PATH = BASE_DIR / "dashboard_server.py"
 spec = importlib.util.spec_from_file_location("dashboard_server", MODULE_PATH)
 dashboard_server = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(dashboard_server)
+
+ORCH_PATH = BASE_DIR / "council_orchestrator.py"
+orch_spec = importlib.util.spec_from_file_location("council_orchestrator", ORCH_PATH)
+council_orchestrator = importlib.util.module_from_spec(orch_spec)
+assert orch_spec.loader is not None
+orch_spec.loader.exec_module(council_orchestrator)
 
 
 class RecordingHandler(BaseHTTPRequestHandler):
@@ -302,6 +309,73 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("event: run.created", body)
         self.assertIn("event: run.status", body)
         self.assertIn(run.run_id, body)
+
+
+class FakeArtifactStore:
+    def __init__(self):
+        self.calls = []
+
+    def persist_artifact(self, run_id, artifact):
+        self.calls.append((run_id, artifact))
+        return {"ok": True, "path": f"/tmp/{run_id}.json"}
+
+
+class CouncilOrchestratorProtocolTests(unittest.TestCase):
+    def test_multi_round_protocol_emits_round_and_artifact_events(self):
+        event_bus = dashboard_server.CouncilEventBus()
+        store = FakeArtifactStore()
+
+        orchestrator = council_orchestrator.CouncilOrchestrator(
+            event_bus=event_bus,
+            tools_url_for_port=lambda _port: "http://unused",
+            token_for_port=lambda _port: "token",
+            port_for_slug=lambda _slug: 18789,
+            participant_slug_map={"Workspace Manager": "workspace-manager", "Senku Ishigami": "senku-ishigami"},
+            artifact_store=store,
+        )
+
+        run = event_bus.create_run(
+            {
+                "id": "session-x",
+                "title": "Test council",
+                "topic": "Ship council phases",
+                "participants": ["workspace-manager", "senku-ishigami"],
+            },
+            dashboard_server.now_iso(),
+        )
+
+        def fake_send(_port, session_key, message):
+            if "Round: proposal" in message:
+                reply = f"proposal from {session_key}"
+            elif "Round: critique" in message:
+                reply = f"critique from {session_key}"
+            else:
+                reply = f"synthesis from {session_key}"
+            return {"details": {"status": "ok", "reply": reply}}
+
+        orchestrator._resolve_session_key = lambda slug, _port: f"session:{slug}"  # type: ignore[attr-defined]
+        orchestrator._send_message = fake_send  # type: ignore[attr-defined]
+
+        orchestrator._run(run.run_id)
+
+        state = event_bus.get_run(run.run_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.status, "completed")
+
+        event_types = [item["type"] for item in state.history]
+        self.assertIn("round.status", event_types)
+        self.assertIn("artifact.persisted", event_types)
+
+        round_names = [
+            item["payload"].get("round")
+            for item in state.history
+            if item["type"] == "round.status" and item["payload"].get("state") in {"started", "published"}
+        ]
+        self.assertIn("context", round_names)
+        self.assertIn("proposal", round_names)
+        self.assertIn("critique", round_names)
+        self.assertIn("synthesis", round_names)
+        self.assertEqual(len(store.calls), 1)
 
 
 if __name__ == "__main__":
