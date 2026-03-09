@@ -3062,6 +3062,8 @@
       const messagesByRun = new Map();
       const activeRunControllers = new Map();
       const runtimeToolCache = new Map();
+      const councilEventSources = new Map();
+      const participantStatesByRun = new Map();
 
       // ── Helpers ──────────────────────────────────────────────────────────
       function esc(v) {
@@ -3271,6 +3273,137 @@
         const next = [...list, message];
         writeJson(localMessagesKey(message.run_id), next);
         messagesByRun.set(message.run_id, next);
+      }
+
+      function upsertParticipantState(runId, nextState) {
+        const list = participantStatesByRun.get(runId) || [];
+        const filtered = list.filter((item) => String(item.agent_slug || "") !== String(nextState.agent_slug || ""));
+        filtered.push(nextState);
+        participantStatesByRun.set(runId, filtered);
+      }
+
+      function closeCouncilEventStream(runId) {
+        const source = councilEventSources.get(runId);
+        if (source) {
+          source.close();
+          councilEventSources.delete(runId);
+        }
+      }
+
+      function applyCouncilEvent(event) {
+        const runId = String(event?.run_id || event?.payload?.run_id || "");
+        if (!runId) return;
+
+        if (event.type === "message") {
+          const payload = event.payload || {};
+          appendLocalMessage({
+            id: event.id || generateUuid(),
+            run_id: runId,
+            agent_slug: payload.agent_slug || "system",
+            role: payload.role || "system",
+            content: payload.content || "",
+            created_at: payload.created_at || event.created_at || nowIso(),
+          });
+        }
+
+        if (event.type === "participant.status") {
+          const payload = event.payload || {};
+          upsertParticipantState(runId, {
+            agent_slug: payload.agent_slug || "",
+            participant: payload.participant || participantDisplay(payload.agent_slug || ""),
+            state: payload.state || "idle",
+            details: payload.details || "",
+            session_key: payload.session_key || "",
+            created_at: payload.created_at || event.created_at || nowIso(),
+          });
+        }
+
+        if (event.type === "run.status" || event.type === "run.created") {
+          const payload = event.payload || {};
+          const run = runsById.get(runId) || { id: runId, session_id: payload.session_id || "", created_by: "dashboard", error: null };
+          run.status = payload.status || run.status || "queued";
+          run.started_at = payload.started_at || run.started_at || payload.created_at || nowIso();
+          run.ended_at = payload.ended_at || run.ended_at || null;
+          if (Object.prototype.hasOwnProperty.call(payload, "error")) {
+            run.error = payload.error;
+          }
+          runsById.set(runId, run);
+          writeLocalRun(run);
+
+          const session = sessions.find((item) => String(item.id) === String(run.session_id || payload.session_id || ""));
+          if (session) {
+            session.last_run_id = runId;
+            session.run_status = run.status;
+            session.run_started_at = run.started_at || session.run_started_at;
+            session.run_finished_at = run.ended_at || session.run_finished_at;
+            saveLocalSessions();
+          }
+
+          if (["completed", "failed", "stopped"].includes(String(run.status || "").toLowerCase())) {
+            closeCouncilEventStream(runId);
+          }
+        }
+
+        const linkedRun = runsById.get(runId);
+        const linkedSession = sessions.find((item) => String(item.id) === String(linkedRun?.session_id || ""));
+        if (linkedSession && selectedSessionId && String(selectedSessionId) === String(linkedSession.id)) {
+          renderDetail(linkedSession);
+        }
+
+        renderStats();
+      }
+
+      function startCouncilEventStream(runId, sessionId) {
+        closeCouncilEventStream(runId);
+        const source = new EventSource(`/api/council/run/stream?run_id=${encodeURIComponent(runId)}`);
+        source.addEventListener("message", (msg) => {
+          try {
+            const event = JSON.parse(msg.data);
+            applyCouncilEvent(event);
+          } catch (error) {
+            console.error("Failed to parse council event:", error);
+          }
+        });
+        source.addEventListener("participant.status", (msg) => {
+          try {
+            applyCouncilEvent(JSON.parse(msg.data));
+          } catch (error) {
+            console.error("Failed to parse council participant event:", error);
+          }
+        });
+        source.addEventListener("run.status", (msg) => {
+          try {
+            applyCouncilEvent(JSON.parse(msg.data));
+          } catch (error) {
+            console.error("Failed to parse council status event:", error);
+          }
+        });
+        source.addEventListener("run.created", (msg) => {
+          try {
+            const event = JSON.parse(msg.data);
+            const run = {
+              id: event.payload?.run_id || runId,
+              session_id: sessionId,
+              status: event.payload?.status || "queued",
+              started_at: event.payload?.created_at || nowIso(),
+              ended_at: null,
+              created_by: "dashboard",
+              error: null,
+            };
+            runsById.set(runId, run);
+            applyCouncilEvent(event);
+          } catch (error) {
+            console.error("Failed to parse council created event:", error);
+          }
+        });
+        source.onerror = () => {
+          const run = runsById.get(runId);
+          const terminal = ["completed", "failed", "stopped"].includes(String(run?.status || "").toLowerCase());
+          if (terminal) {
+            closeCouncilEventStream(runId);
+          }
+        };
+        councilEventSources.set(runId, source);
       }
 
       function normalizeSession(row) {
@@ -4134,6 +4267,7 @@
         const runStatus = run?.status || session.run_status || "idle";
         const runMeta = runStatusMeta(runStatus);
         const runMessages = runId ? (messagesByRun.get(runId) || []) : [];
+        const participantStates = runId ? (participantStatesByRun.get(runId) || []) : [];
         const isRunning = ["queued", "running"].includes(String(runStatus).toLowerCase());
 
         const unsyncedRuns = readJson(LOCAL_UNSYNCED_RUNS_KEY, []);
@@ -4174,6 +4308,18 @@
 
             <div class="mt-3 flex flex-wrap gap-1.5">
               ${participantsHtml || '<span class="text-xs text-slate-500">No participants</span>'}
+            </div>
+
+            <div class="mt-3 rounded-xl border border-white/10 bg-slate-900/45 p-3">
+              <p class="text-[11px] uppercase tracking-wider text-slate-500">Live Participation</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                ${participantStates.length > 0
+                  ? participantStates.map((item) => {
+                      const meta = runStatusMeta(item.state || "idle");
+                      return `<span class="rounded-full border px-2 py-1 text-[11px] font-semibold ${meta.klass}" title="${esc(item.details || "")}">${esc(participantDisplay(item.agent_slug || item.participant || "Unknown"))}: ${esc(meta.label)}</span>`;
+                    }).join("")
+                  : '<span class="text-xs text-slate-500">No live participant states yet.</span>'}
+              </div>
             </div>
 
             <div class="mt-4 rounded-xl border border-white/10 bg-slate-900/45 p-3">
@@ -4229,136 +4375,72 @@
           return;
         }
 
-        const runId = generateUuid();
-        const startedAt = nowIso();
-
-        const run = {
-          id: runId,
-          session_id: session.id,
-          status: "queued",
-          started_at: startedAt,
-          ended_at: null,
-          created_by: "dashboard",
-          error: null,
-        };
-
-        await upsertRunRecord(run);
-
-        session.last_run_id = runId;
-        session.run_status = "queued";
-        session.run_started_at = startedAt;
-        session.run_finished_at = "";
-        session.participant_bindings = (session.participant_bindings || []).map((binding) => ({ ...binding, session_key: runId }));
-
-        await updateSessionState(session.id, {
-          last_run_id: runId,
-          run_status: "queued",
-          run_started_at: startedAt,
-          run_finished_at: null,
-          participant_bindings: session.participant_bindings,
-        });
-
-        await insertRunMessage({
-          id: generateUuid(),
-          run_id: runId,
-          agent_slug: "system",
-          role: "system",
-          content: "Council run queued.",
-          created_at: nowIso(),
-        });
-
-        activeRunControllers.set(runId, { stopped: false, runId });
-
-        run.status = "running";
-        await upsertRunRecord(run);
-        session.run_status = "running";
-        await updateSessionState(session.id, { run_status: "running" });
-
-        await insertRunMessage({
-          id: generateUuid(),
-          run_id: runId,
-          agent_slug: "system",
-          role: "system",
-          content: "Council run started.",
-          created_at: nowIso(),
-        });
-
-        renderDetail(session);
-
-        let outcome;
         try {
-          outcome = await dispatchCouncilRun(runId, session);
+          const response = await fetch("/api/council/run/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: session.id,
+              title: session.title,
+              topic,
+              notes: session.notes || "",
+              participants,
+              participant_bindings: session.participant_bindings || [],
+              meeting_at: session.meeting_at,
+            }),
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.ok || !payload?.run?.id) {
+            throw new Error(payload?.error?.message || `Council start failed (${response.status})`);
+          }
+
+          const runId = String(payload.run.id);
+          const startedAt = String(payload.run.created_at || nowIso());
+
+          const run = {
+            id: runId,
+            session_id: session.id,
+            status: String(payload.run.status || "queued"),
+            started_at: startedAt,
+            ended_at: null,
+            created_by: "dashboard",
+            error: null,
+          };
+          runsById.set(runId, run);
+          await upsertRunRecord(run);
+
+          session.last_run_id = runId;
+          session.run_status = run.status;
+          session.run_started_at = startedAt;
+          session.run_finished_at = "";
+          session.participant_bindings = (session.participant_bindings || []).map((binding) => ({ ...binding, session_key: runId }));
+
+          await updateSessionState(session.id, {
+            last_run_id: runId,
+            run_status: run.status,
+            run_started_at: startedAt,
+            run_finished_at: null,
+            participant_bindings: session.participant_bindings,
+          });
+
+          participantStatesByRun.set(
+            runId,
+            participants.map((slug) => ({
+              agent_slug: slug,
+              participant: participantDisplay(slug),
+              state: "waiting",
+              details: "Queued",
+              session_key: "",
+              created_at: nowIso(),
+            })),
+          );
+
+          startCouncilEventStream(runId, session.id);
+          renderDetail(session);
         } catch (err) {
-          outcome = {
-            status: "failed",
-            errorObject: {
-              failed_agents: [{
-                agent_slug: "system",
-                port: 18789,
-                tool: "dispatch",
-                error_type: classifyDispatchError(err.message),
-                message: err.message,
-              }],
-              success_count: 0,
-              failure_count: 1,
-            },
-          };
+          window.alert(err?.message || "Failed to start council run.");
         }
-
-        const finishedAt = nowIso();
-
-        if (outcome.status === "completed") {
-          run.status = "completed";
-          run.error = outcome.errorObject && outcome.errorObject.failure_count > 0 ? outcome.errorObject : null;
-          run.ended_at = finishedAt;
-          await insertRunMessage({
-            id: generateUuid(),
-            run_id: runId,
-            agent_slug: "system",
-            role: "system",
-            content: run.error ? `Council run completed with ${run.error.failure_count} dispatch issue(s).` : "Council run completed.",
-            created_at: finishedAt,
-          });
-        } else if (outcome.status === "stopped") {
-          run.status = "stopped";
-          run.error = outcome.errorObject || "Stopped by user";
-          run.ended_at = finishedAt;
-        } else {
-          run.status = "failed";
-          run.error = outcome.errorObject || {
-            failed_agents: [{
-              agent_slug: "system",
-              port: 18789,
-              tool: "dispatch",
-              error_type: "other",
-              message: "Council run failed",
-            }],
-            success_count: 0,
-            failure_count: 1,
-          };
-          run.ended_at = finishedAt;
-          await insertRunMessage({
-            id: generateUuid(),
-            run_id: runId,
-            agent_slug: "system",
-            role: "system",
-            content: `Council run failed: ${JSON.stringify(run.error)}`,
-            created_at: finishedAt,
-          });
-        }
-
-        await upsertRunRecord(run);
-        session.run_status = run.status;
-        session.run_finished_at = run.ended_at;
-
-        await updateSessionState(session.id, {
-          run_status: run.status,
-          run_finished_at: run.ended_at,
-        });
-
-        activeRunControllers.delete(runId);
-        await loadRunArtifactsForSession(session);
-        renderDetail(session);
       }
 
       async function stopCouncilRun(sessionId) {
@@ -4368,60 +4450,45 @@
         const runId = String(session.last_run_id || "");
         if (!runId) return;
 
-        const run = runsById.get(runId) || readLocalRun(runId);
-        if (!run) return;
-
-        const controller = activeRunControllers.get(runId) || { stopped: false, runId };
-        controller.stopped = true;
-        activeRunControllers.set(runId, controller);
-
-        const caps = await probeRuntimeCapabilities();
-        let cancelNote = "Run stop requested.";
-
-        if (caps.subagents) {
-          try {
-            await invokeRuntime("subagents", null, { action: "kill", target: runId }, { dryRun: false });
-            cancelNote = "Run stop requested (runtime kill attempted via subagents).";
-          } catch (err) {
-            cancelNote = `Runtime cancel attempt failed: ${err.message}`;
+        try {
+          const response = await fetch("/api/council/run/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: runId }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.ok) {
+            throw new Error(payload?.error?.message || `Council stop failed (${response.status})`);
           }
-        } else if (caps.process) {
-          try {
-            await invokeRuntime("process", null, { action: "kill", sessionId: runId }, { dryRun: false });
-            cancelNote = "Run stop requested (runtime kill attempted via process).";
-          } catch (err) {
-            cancelNote = `Runtime cancel attempt failed: ${err.message}`;
+
+          await insertRunMessage({
+            id: generateUuid(),
+            run_id: runId,
+            agent_slug: "system",
+            role: "system",
+            content: "Run stop requested.",
+            created_at: nowIso(),
+          });
+
+          const run = runsById.get(runId);
+          if (run && !["completed", "failed", "stopped"].includes(String(run.status || "").toLowerCase())) {
+            run.status = "stopped";
+            run.ended_at = nowIso();
+            runsById.set(runId, run);
           }
-        } else {
-          cancelNote = "Runtime cancel capability not exposed (missing process/subagents cancel tooling).";
+
+          session.run_status = "stopped";
+          session.run_finished_at = nowIso();
+          await updateSessionState(session.id, {
+            run_status: "stopped",
+            run_finished_at: session.run_finished_at,
+          });
+
+          closeCouncilEventStream(runId);
+          renderDetail(session);
+        } catch (err) {
+          window.alert(err?.message || "Failed to stop council run.");
         }
-
-        await insertRunMessage({
-          id: generateUuid(),
-          run_id: runId,
-          agent_slug: "system",
-          role: "system",
-          content: cancelNote,
-          created_at: nowIso(),
-        });
-
-        run.status = "stopped";
-        run.ended_at = nowIso();
-        run.error = cancelNote;
-
-        await upsertRunRecord(run);
-
-        session.run_status = "stopped";
-        session.run_finished_at = run.ended_at;
-
-        await updateSessionState(session.id, {
-          run_status: "stopped",
-          run_finished_at: run.ended_at,
-        });
-
-        activeRunControllers.delete(runId);
-        await loadRunArtifactsForSession(session);
-        renderDetail(session);
       }
 
       async function manualSyncSessionRun(sessionId) {

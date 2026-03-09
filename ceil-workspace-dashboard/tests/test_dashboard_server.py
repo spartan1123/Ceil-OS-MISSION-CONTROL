@@ -39,6 +39,14 @@ class RecordingHandler(BaseHTTPRequestHandler):
         return
 
 
+class DummyCouncilOrchestrator:
+    def __init__(self):
+        self.started = []
+
+    def start_run(self, run_id):
+        self.started.append(run_id)
+
+
 class DashboardServerTests(unittest.TestCase):
     def setUp(self):
         RecordingHandler.calls = []
@@ -72,13 +80,15 @@ class DashboardServerTests(unittest.TestCase):
         self.gateway.server_close()
         self.gateway_thread.join(timeout=2)
 
-    def make_dashboard(self, *, allowed_origins=None, allowed_ports=None, config_path=None):
+    def make_dashboard(self, *, allowed_origins=None, allowed_ports=None, config_path=None, council_orchestrator=None):
         handler_cls = dashboard_server.build_handler(str(self.dashboard_dir))
         server = dashboard_server.ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
         server.allowed_origins = set(allowed_origins or [])
         server.allowed_gateway_ports = set(allowed_ports or {18789, 19001})
         server.config_path = str(config_path or self.default_config)
         server.tools_url = f"http://127.0.0.1:{self.gateway.server_address[1]}/tools/invoke"
+        server.council_event_bus = dashboard_server.CouncilEventBus()
+        server.council_orchestrator = council_orchestrator or DummyCouncilOrchestrator()
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
@@ -206,6 +216,92 @@ class DashboardServerTests(unittest.TestCase):
         body = json.loads(ctx.exception.read().decode("utf-8"))
         self.assertEqual(body["error"]["message"], "Invalid or disallowed gateway port")
         self.assertEqual(len(RecordingHandler.calls), 0)
+
+    def test_council_start_requires_topic(self):
+        server = self.make_dashboard()
+        with self.assertRaises(HTTPError) as ctx:
+            self.request(
+                server,
+                path="/api/council/run/start",
+                payload={"id": "session-1", "participants": ["workspace-manager", "senku-ishigami"]},
+                headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            )
+
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"]["message"], "Council run requires a topic")
+
+    def test_council_start_creates_run_and_invokes_orchestrator(self):
+        orchestrator = DummyCouncilOrchestrator()
+        server = self.make_dashboard(council_orchestrator=orchestrator)
+
+        with self.request(
+            server,
+            path="/api/council/run/start",
+            payload={
+                "id": "session-1",
+                "title": "Test Session",
+                "topic": "Stabilize runtime join",
+                "participants": ["workspace-manager", "senku-ishigami"],
+            },
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+        ) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 202)
+        self.assertTrue(body["ok"])
+        run_id = body["run"]["id"]
+        self.assertTrue(run_id)
+        self.assertIn(run_id, orchestrator.started)
+        self.assertIsNotNone(server.council_event_bus.get_run(run_id))
+
+    def test_council_stop_marks_stop_requested(self):
+        server = self.make_dashboard()
+        run = server.council_event_bus.create_run(
+            {
+                "id": "session-1",
+                "topic": "stop test",
+                "participants": ["workspace-manager", "senku-ishigami"],
+            },
+            dashboard_server.now_iso(),
+        )
+
+        with self.request(
+            server,
+            path="/api/council/run/stop",
+            payload={"run_id": run.run_id},
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+        ) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["ok"])
+        self.assertTrue(server.council_event_bus.get_run(run.run_id).stop_requested)
+
+    def test_council_stream_replays_terminal_history(self):
+        server = self.make_dashboard()
+        run = server.council_event_bus.create_run(
+            {
+                "id": "session-1",
+                "topic": "stream test",
+                "participants": ["workspace-manager", "senku-ishigami"],
+            },
+            dashboard_server.now_iso(),
+        )
+        server.council_event_bus.update_status(run.run_id, "completed", dashboard_server.now_iso())
+
+        with self.request(
+            server,
+            path=f"/api/council/run/stream?run_id={run.run_id}",
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="GET",
+        ) as resp:
+            body = resp.read().decode("utf-8")
+
+        self.assertEqual(resp.status, 200)
+        self.assertIn("event: run.created", body)
+        self.assertIn("event: run.status", body)
+        self.assertIn(run.run_id, body)
 
 
 if __name__ == "__main__":

@@ -7,12 +7,21 @@ import argparse
 import glob
 import json
 import os
+import queue
 import sys
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
+
+from council_events import CouncilEventBus
+from council_orchestrator import CouncilOrchestrator
 
 
 def parse_allowed_gateway_ports(raw: str | None) -> set[int]:
@@ -56,6 +65,20 @@ DEFAULT_PORT_CONFIG_MAP = {
     19101: "/root/.openclaw/instances/senku-ishigami.json",
     19111: "/root/.openclaw/instances/ariana.json",
 }
+DEFAULT_PARTICIPANT_TO_SLUG = {
+    "Workspace Manager": "workspace-manager",
+    "Provisioning Architect": "provisioning-architect",
+    "Security & Compliance": "security-compliance",
+    "Reliability / SRE": "reliability-sre",
+    "Cost & Model Governor": "cost-model-governor",
+    "Quality Auditor": "quality-auditor",
+    "OS Monitor Template": "os-monitor-template",
+    "Workspace Orchestrator": "workspace-orchestrator",
+    "OS Monitor": "os-monitor",
+    "Research Search": "research-search",
+    "Senku Ishigami": "senku-ishigami",
+    "Ariana": "ariana",
+}
 
 
 def parse_allowed_origins(raw: str | None) -> set[str]:
@@ -67,6 +90,21 @@ def parse_allowed_origins(raw: str | None) -> set[str]:
         if candidate:
             out.add(candidate)
     return out
+
+
+def now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def participant_slug(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw in DEFAULT_PARTICIPANT_TO_SLUG.values():
+        return raw
+    if raw in DEFAULT_PARTICIPANT_TO_SLUG:
+        return DEFAULT_PARTICIPANT_TO_SLUG[raw]
+    return "-".join(raw.lower().replace("/", " ").split())
 
 
 def load_gateway_token(config_path: str) -> str:
@@ -123,6 +161,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def allowed_gateway_ports(self) -> set[int]:
         return self.server.allowed_gateway_ports  # type: ignore[attr-defined]
 
+    @property
+    def council_event_bus(self):
+        return self.server.council_event_bus  # type: ignore[attr-defined]
+
+    @property
+    def council_orchestrator(self):
+        return self.server.council_orchestrator  # type: ignore[attr-defined]
+
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         # Keep request logs concise and never print headers/token values.
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -170,7 +216,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path != "/api/tools/invoke":
+        if parsed.path not in {"/api/tools/invoke", "/api/council/run/start", "/api/council/run/stop", "/api/council/run/stream"}:
             self.send_error(404)
             return
 
@@ -184,8 +230,66 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _handle_council_stream(self, parsed) -> None:
+        run_id = parse_qs(parsed.query or "").get("run_id", [""])[0].strip()
+        if not run_id:
+            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Missing required query parameter: run_id"}}, add_cors=False)
+            return
+
+        try:
+            subscription, history = self.council_event_bus.subscribe(run_id, replay=True)
+        except KeyError:
+            self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown council run: {run_id}"}}, add_cors=False)
+            return
+
+        self.send_response(200)
+        self._add_cors_headers_if_allowed()
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        try:
+            terminal_seen_in_history = False
+            for event in history:
+                self.wfile.write(self.council_event_bus.format_sse(event))
+                if str(event.get("type") or "") == "run.status":
+                    status = str(event.get("payload", {}).get("status") or "")
+                    if status in {"completed", "failed", "stopped"}:
+                        terminal_seen_in_history = True
+            self.wfile.flush()
+
+            if terminal_seen_in_history:
+                self.close_connection = True
+                return
+
+            while True:
+                try:
+                    event = subscription.get(timeout=15)
+                except queue.Empty:
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    continue
+
+                self.wfile.write(self.council_event_bus.format_sse(event))
+                self.wfile.flush()
+
+                event_type = str(event.get("type") or "")
+                if event_type == "run.status":
+                    status = str(event.get("payload", {}).get("status") or "")
+                    if status in {"completed", "failed", "stopped"}:
+                        self.close_connection = True
+                        return
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        finally:
+            self.council_event_bus.unsubscribe(run_id, subscription)
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/council/run/stream":
+            self._handle_council_stream(parsed)
+            return
         if parsed.path != "/api/health":
             super().do_GET()
             return
@@ -231,8 +335,81 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         return f"http://127.0.0.1:{port}/tools/invoke", port
 
+    def _read_json_body(self) -> tuple[dict | None, tuple[int, dict] | None]:
+        raw_len = self.headers.get("Content-Length")
+        try:
+            body_len = int(raw_len or "0")
+        except ValueError:
+            return None, (400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid Content-Length"}})
+
+        if body_len <= 0 or body_len > 2_000_000:
+            return None, (400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid request size"}})
+
+        body = self.rfile.read(body_len)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return None, (400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid JSON body"}})
+
+        if not isinstance(payload, dict):
+            return None, (400, {"ok": False, "error": {"type": "bad_request", "message": "JSON body must be an object"}})
+        return payload, None
+
+    def _handle_council_start(self) -> None:
+        payload, error = self._read_json_body()
+        if error:
+            self._write_json(error[0], error[1])
+            return
+
+        topic = str(payload.get("topic") or payload.get("notes") or "").strip()
+        participants = [participant_slug(item) for item in payload.get("participants", []) if participant_slug(item)]
+        if not topic:
+            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Council run requires a topic"}})
+            return
+        if len(participants) < 2:
+            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Council run requires at least 2 participants"}})
+            return
+
+        payload["participants"] = participants
+        created_at = now_iso()
+        state = self.council_event_bus.create_run(payload, created_at)
+        self.council_orchestrator.start_run(state.run_id)
+        self._write_json(202, {
+            "ok": True,
+            "run": {
+                "id": state.run_id,
+                "session_id": state.session_id,
+                "status": state.status,
+                "created_at": created_at,
+            },
+        })
+
+    def _handle_council_stop(self) -> None:
+        payload, error = self._read_json_body()
+        if error:
+            self._write_json(error[0], error[1])
+            return
+
+        run_id = str(payload.get("run_id") or "").strip()
+        if not run_id:
+            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Missing required field: run_id"}})
+            return
+
+        state = self.council_event_bus.mark_stop_requested(run_id, now_iso())
+        if not state:
+            self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown council run: {run_id}"}})
+            return
+
+        self._write_json(200, {"ok": True, "run": {"id": run_id, "status": state.status, "stop_requested": True}})
+
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/api/council/run/start":
+            self._handle_council_start()
+            return
+        if parsed.path == "/api/council/run/stop":
+            self._handle_council_stop()
+            return
         if parsed.path != "/api/tools/invoke":
             self.send_error(404)
             return
@@ -243,28 +420,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._write_json(403, {"ok": False, "error": {"type": "forbidden", "message": "Origin not allowed"}}, add_cors=False)
             return
 
-        raw_len = self.headers.get("Content-Length")
-        try:
-            body_len = int(raw_len or "0")
-        except ValueError:
-            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid Content-Length"}})
+        payload, error = self._read_json_body()
+        if error:
+            self._write_json(error[0], error[1])
             return
 
-        if body_len <= 0 or body_len > 2_000_000:
-            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid request size"}})
-            return
-
-        body = self.rfile.read(body_len)
-
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError:
-            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid JSON body"}})
-            return
-
-        if not isinstance(payload, dict) or not isinstance(payload.get("tool"), str) or not payload["tool"].strip():
+        if not isinstance(payload.get("tool"), str) or not payload["tool"].strip():
             self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Missing required field: tool"}})
             return
+
+        body = json.dumps(payload).encode("utf-8")
 
         resolved = self._resolve_tools_url(parsed)
         if not resolved:
@@ -351,6 +516,14 @@ def main() -> int:
     server.allowed_gateway_ports = allowed_ports  # type: ignore[attr-defined]
     server.config_path = args.config  # type: ignore[attr-defined]
     server.tools_url = args.tools_url  # type: ignore[attr-defined]
+    server.council_event_bus = CouncilEventBus()  # type: ignore[attr-defined]
+    server.council_orchestrator = CouncilOrchestrator(  # type: ignore[attr-defined]
+        event_bus=server.council_event_bus,
+        tools_url_for_port=lambda port: f"http://127.0.0.1:{port}/tools/invoke",
+        token_for_port=lambda port: load_gateway_token(find_config_for_port(args.config, port)),
+        port_for_slug=lambda slug: next((candidate_port for candidate_port, path in DEFAULT_PORT_CONFIG_MAP.items() if Path(path).stem == slug), 18789),
+        participant_slug_map=DEFAULT_PARTICIPANT_TO_SLUG,
+    )
 
     print(f"Dashboard server listening on http://{args.bind}:{args.port} (dir={args.directory})")
     try:
