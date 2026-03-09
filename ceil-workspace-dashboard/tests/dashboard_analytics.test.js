@@ -112,19 +112,20 @@ test('buildOrgChartStats returns per-agent stats and derived metrics', () => {
       { agent_name: 'workspace-manager', model_used: 'y', status: 'completed', created_at: '2026-03-08T11:00:00Z' },
     ],
     todayEntries: [
-      { agent_name: 'senku-ishigami', created_at: '2026-03-08T10:00:00Z' },
-      { agent_name: 'senku-ishigami', created_at: '2026-03-08T10:30:00Z' },
-      { agent_name: 'workspace-manager', created_at: '2026-03-08T11:00:00Z' },
+      { agent_name: 'senku-ishigami', task_description: 'Shipped', status: 'completed', created_at: '2026-03-08T10:00:00Z' },
+      { agent_name: 'senku-ishigami', task_description: 'Heartbeat', status: 'completed', created_at: '2026-03-08T10:30:00Z' },
+      { agent_name: 'workspace-manager', task_description: 'Coordinated', status: 'success', created_at: '2026-03-08T11:00:00Z' },
     ],
     weekTotalCount: 8,
     weekSuccessCount: 6,
     resolveAgentFromLogName: resolver.resolveAgentFromLogName,
+    isCountableTask: utils.isCountableTask,
   });
 
   assert.equal(org.metrics.activeToday, 2);
-  assert.equal(org.metrics.totalToday, 3);
+  assert.equal(org.metrics.totalToday, 2);
   assert.equal(org.metrics.totalWeek, 8);
   assert.equal(org.metrics.successRate, '75.0%');
-  assert.equal(org.statsByName.get('Senku Ishigami').tasksToday, 2);
+  assert.equal(org.statsByName.get('Senku Ishigami').tasksToday, 1);
   assert.equal(org.statsByName.get('Workspace Manager').latest.model_used, 'y');
 });

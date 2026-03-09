@@ -98,6 +98,7 @@
     weekTotalCount = 0,
     weekSuccessCount = 0,
     resolveAgentFromLogName,
+    isCountableTask,
   }) {
     const statsByName = new Map((Array.isArray(agents) ? agents : []).map((agent) => [agent.name, { tasksToday: 0, latest: null }]));
 
@@ -112,11 +113,11 @@
       const meta = resolveAgentFromLogName?.(row.agent_name);
       if (!meta) continue;
       const stats = statsByName.get(meta.name);
-      if (stats) stats.tasksToday += 1;
+      if (stats && (!isCountableTask || isCountableTask(row))) stats.tasksToday += 1;
     }
 
     const activeToday = [...statsByName.values()].filter((stats) => stats.tasksToday > 0).length;
-    const totalToday = (todayEntries || []).length;
+    const totalToday = [...statsByName.values()].reduce((sum, stats) => sum + Number(stats.tasksToday || 0), 0);
 
     return {
       statsByName,
