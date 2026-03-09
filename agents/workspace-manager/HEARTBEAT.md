@@ -1,0 +1,22 @@
+# HEARTBEAT — Activity Log
+
+## Event Types
+- AGENT_WAKE, STANDUP_STARTED, STANDUP_COMPLETED
+- PROPOSAL_CREATED, PROPOSAL_APPROVED
+- COMMAND_ISSUED, COMMAND_ACKED, COMMAND_EXECUTED
+- MONITOR_REPORT_RECEIVED, ALERT_AGGREGATED, ESCALATION_TRIGGERED
+- COORDINATION_INITIATED, USER_NOTIFIED
+
+---
+## Legacy Preserved Notes
+
+# HEARTBEAT.md
+
+# Keep this file empty (or with only comments) to skip heartbeat API calls.
+
+# Add tasks below when you want the agent to check something periodically.
+
+
+## Imported Event Taxonomy (2026-03-03)
+- Operational: STANDUP_STARTED/COMPLETED, PROPOSAL_CREATED/APPROVED, COMMAND_ISSUED/ACKED/EXECUTED.\n- Monitoring: MONITOR_REPORT_RECEIVED, ALERT_AGGREGATED, ESCALATION_TRIGGERED.
+

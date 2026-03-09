@@ -1,0 +1,19 @@
+# Secrets and local state
+**/.secrets/
+**/*.env
+**/.env
+**/.env.*
+.openclaw/
+
+# Local backups and artifacts
+backups/
+ceil-workspace-dashboard/tests/artifacts/
+
+# Installed tooling / caches
+tools/
+**/node_modules/
+__pycache__/
+*.pyc
+
+# OS/editor noise
+.DS_Store

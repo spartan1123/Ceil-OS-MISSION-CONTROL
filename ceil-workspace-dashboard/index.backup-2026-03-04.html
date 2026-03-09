@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ceil OS Dashboard</title>
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Supabase JS SDK CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- Supabase project config -->
+    <script>
+      window.SUPABASE_URL = "https://fvqqejrlgsksudjlfxeh.supabase.co";
+      window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2cXFlanJsZ3Nrc3VkamxmeGVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1OTA1OTksImV4cCI6MjA4ODE2NjU5OX0.q_i7ShnJ5j0OPNOBjUQaaHeMqrnS_W70zmjMPAz_jYo";
+    </script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "sans-serif"],
+            },
+            colors: {
+              obsidian: "#0A0F1E",
+              violetx: "#7C3AED",
+              pinkx: "#EC4899",
+              cyanx: "#06B6D4",
+              amberx: "#F59E0B",
+            },
+            keyframes: {
+              fadeSlideIn: {
+                "0%": { opacity: "0", transform: "translateY(14px) scale(0.99)" },
+                "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+              },
+            },
+            animation: {
+              fadeSlideIn: "fadeSlideIn 520ms cubic-bezier(0.22, 1, 0.36, 1) forwards",
+            },
+            boxShadow: {
+              glow: "0 0 0 1px rgba(124,58,237,.35), 0 18px 56px rgba(124,58,237,.18)",
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      :root {
+        --bg: #0a0f1e;
+        --violet: #7c3aed;
+        --pink: #ec4899;
+        --cyan: #06b6d4;
+        --amber: #f59e0b;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        background:
+          radial-gradient(circle at 12% 10%, rgba(124, 58, 237, 0.2), transparent 36%),
+          radial-gradient(circle at 88% 20%, rgba(6, 182, 212, 0.16), transparent 28%),
+          radial-gradient(circle at 50% 95%, rgba(236, 72, 153, 0.12), transparent 35%),
+          var(--bg);
+      }
+
+      .glass {
+        background: rgba(255, 255, 255, 0.045);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+
+      .gradient-border {
+        position: relative;
+        border-radius: 1rem;
+        overflow: hidden;
+      }
+
+      .gradient-border::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 1px;
+        background: linear-gradient(
+          135deg,
+          rgba(124, 58, 237, 0.85),
+          rgba(236, 72, 153, 0.9),
+          rgba(6, 182, 212, 0.85),
+          rgba(245, 158, 11, 0.7)
+        );
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+      }
+
+      .top-shell {
+        background:
+          linear-gradient(110deg, rgba(124, 58, 237, 0.26), rgba(236, 72, 153, 0.16) 36%, rgba(6, 182, 212, 0.12) 72%, rgba(245, 158, 11, 0.12));
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.2),
+          0 16px 48px rgba(2, 6, 23, 0.45);
+      }
+
+      #tab-nav {
+        width: max-content;
+        max-width: 100%;
+        border-radius: 0.95rem;
+        overflow: hidden;
+        isolation: isolate;
+      }
+
+      .nav-bubble {
+        position: absolute;
+        inset: 0;
+        border-radius: 0.95rem;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background:
+          linear-gradient(150deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)),
+          linear-gradient(120deg, rgba(6, 182, 212, 0.08), rgba(124, 58, 237, 0.1), rgba(236, 72, 153, 0.06));
+        backdrop-filter: blur(12px) saturate(145%);
+        -webkit-backdrop-filter: blur(12px) saturate(145%);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.26),
+          inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+          0 8px 20px rgba(2, 6, 23, 0.14),
+          0 0 12px rgba(6, 182, 212, 0.07);
+        pointer-events: none;
+      }
+
+      .tab-btn {
+        position: relative;
+        color: rgba(226, 232, 240, 0.9);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 0.75rem;
+        box-shadow: none;
+        cursor: pointer;
+        pointer-events: auto;
+        transition: color 220ms ease, text-shadow 220ms ease, transform 180ms ease;
+      }
+
+      .tab-btn::before {
+        content: "";
+        position: absolute;
+        inset: 1px;
+        border-radius: inherit;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.04));
+        opacity: 0;
+        transition: opacity 200ms ease;
+        pointer-events: none;
+      }
+
+      .tab-btn:hover {
+        color: #ede9fe;
+        transform: translateY(-1px);
+        text-shadow: 0 0 14px rgba(124, 58, 237, 0.35);
+      }
+
+      .tab-btn:hover::before {
+        opacity: 0.42;
+      }
+
+      .tab-btn.active {
+        color: #ddd6fe;
+        text-shadow: 0 0 12px rgba(124, 58, 237, 0.55);
+      }
+
+      .tab-btn.active::before {
+        opacity: 0.66;
+      }
+
+      .tab-btn.tab-press {
+        animation: tabPress 230ms cubic-bezier(0.25, 0.8, 0.25, 1);
+      }
+
+      .tab-pill {
+        transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1), width 360ms cubic-bezier(0.22, 1, 0.36, 1), top 360ms cubic-bezier(0.22, 1, 0.36, 1), left 360ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms ease, filter 240ms ease;
+      }
+
+      #tab-pill {
+        border: 1px solid rgba(255, 255, 255, 0.36);
+        background: linear-gradient(135deg, rgba(124, 58, 237, 0.94), rgba(147, 51, 234, 0.9), rgba(168, 85, 247, 0.86));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.38),
+          0 9px 20px rgba(124, 58, 237, 0.4),
+          0 0 22px rgba(124, 58, 237, 0.34);
+        overflow: hidden;
+      }
+
+      #tab-pill::after {
+        content: "";
+        position: absolute;
+        inset: 1px;
+        border-radius: inherit;
+        background: linear-gradient(120deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0.16) 62%, rgba(255, 255, 255, 0));
+        pointer-events: none;
+      }
+
+      #tab-pill.pill-pulse {
+        animation: pillPulse 430ms ease;
+      }
+
+      @keyframes tabPress {
+        0% {
+          transform: scale(1);
+        }
+        45% {
+          transform: scale(0.96);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+
+      @keyframes pillPulse {
+        0% {
+          filter: brightness(1);
+        }
+        50% {
+          filter: brightness(1.1);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.46),
+            0 12px 24px rgba(124, 58, 237, 0.46),
+            0 0 26px rgba(124, 58, 237, 0.52);
+        }
+        100% {
+          filter: brightness(1);
+        }
+      }
+
+      .tab-panel {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        transform: translateY(8px);
+        pointer-events: none;
+        transition: opacity 300ms ease, transform 300ms ease;
+      }
+
+      .tab-panel.active {
+        position: relative;
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+
+      .panel-card {
+        opacity: 0;
+        transform: translateY(14px);
+      }
+
+      .agent-stat-card {
+        background: rgba(255, 255, 255, 0.045);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+
+      .agent-card {
+        position: relative;
+        border-radius: 1rem;
+        border: 1px solid var(--agent-border, rgba(255, 255, 255, 0.16));
+        background: linear-gradient(155deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.56));
+        box-shadow:
+          0 0 0 1px var(--agent-ring, rgba(124, 58, 237, 0.2)),
+          0 14px 34px var(--agent-shadow, rgba(124, 58, 237, 0.15));
+      }
+
+      .activity-feed {
+        max-height: 24rem;
+        overflow: auto;
+      }
+
+      .empty-note {
+        border: 1px dashed rgba(148, 163, 184, 0.45);
+        background: rgba(15, 23, 42, 0.35);
+        color: rgba(203, 213, 225, 0.85);
+      }
+    </style>
+  </head>
+
+  <body class="font-sans text-slate-100 antialiased">
+    <div class="mx-auto w-full max-w-7xl px-5 py-6 md:px-8 md:py-8">
+      <!-- Top Navigation -->
+      <header class="top-shell gradient-border rounded-2xl p-2 shadow-glow md:p-3">
+        <div class="flex items-center justify-between gap-4">
+          <div class="px-2 py-1">
+            <p class="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-300/80">Workspace</p>
+            <h1 class="text-2xl font-extrabold leading-none text-white">Ceil OS</h1>
+          </div>
+
+          <div id="tab-nav" class="relative inline-flex w-max max-w-full flex-nowrap items-center gap-2 p-1.5">
+          <div class="nav-bubble"></div>
+          <div
+            id="tab-pill"
+            class="tab-pill pointer-events-none absolute left-0 top-0 z-[1] h-10 rounded-xl bg-gradient-to-r from-violetx via-pinkx to-cyanx shadow-[0_0_24px_rgba(124,58,237,.35)]"
+          ></div>
+
+          <button class="tab-btn active relative z-10 h-10 rounded-xl px-4 text-sm font-semibold" data-tab="dashboard">
+            Dashboard
+          </button>
+          <button class="tab-btn relative z-10 h-10 rounded-xl px-4 text-sm font-semibold" data-tab="proposals">
+            Proposals
+          </button>
+          <button class="tab-btn relative z-10 h-10 rounded-xl px-4 text-sm font-semibold" data-tab="agents">
+            Agents
+          </button>
+          <button class="tab-btn relative z-10 h-10 rounded-xl px-4 text-sm font-semibold" data-tab="tasks">
+            Tasks
+          </button>
+          <button class="tab-btn relative z-10 h-10 rounded-xl px-4 text-sm font-semibold" data-tab="settings">
+            Settings
+          </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Tab Content Shell -->
+      <main class="relative mt-6 min-h-[68vh]">
+        <section id="panel-dashboard" class="tab-panel active">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div class="panel-card gradient-border glass h-36 rounded-2xl"></div>
+            <div class="panel-card gradient-border glass h-36 rounded-2xl"></div>
+            <div class="panel-card gradient-border glass h-36 rounded-2xl"></div>
+          </div>
+        </section>
+
+        <section id="panel-proposals" class="tab-panel">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div class="panel-card gradient-border glass h-52 rounded-2xl"></div>
+            <div class="panel-card gradient-border glass h-52 rounded-2xl"></div>
+          </div>
+        </section>
+
+        <section id="panel-agents" class="tab-panel">
+          <div class="space-y-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <article class="agent-stat-card panel-card rounded-2xl p-4">
+                <p class="text-xs uppercase tracking-[0.12em] text-slate-400">Total tasks today</p>
+                <p id="stat-total-today" class="mt-2 text-2xl font-bold text-white">0</p>
+              </article>
+
+              <article class="agent-stat-card panel-card rounded-2xl p-4">
+                <p class="text-xs uppercase tracking-[0.12em] text-slate-400">Total tasks this week</p>
+                <p id="stat-total-week" class="mt-2 text-2xl font-bold text-white">0</p>
+              </article>
+
+              <article class="agent-stat-card panel-card rounded-2xl p-4">
+                <p class="text-xs uppercase tracking-[0.12em] text-slate-400">Most active agent</p>
+                <p id="stat-most-active" class="mt-2 text-sm font-semibold text-slate-100">N/A</p>
+              </article>
+
+              <article class="agent-stat-card panel-card rounded-2xl p-4">
+                <p class="text-xs uppercase tracking-[0.12em] text-slate-400">Success rate</p>
+                <p id="stat-success-rate" class="mt-2 text-2xl font-bold text-white">N/A</p>
+              </article>
+            </div>
+
+            <div id="agents-card-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3"></div>
+
+            <div class="grid grid-cols-1 gap-4 2xl:grid-cols-5">
+              <article class="agent-stat-card panel-card rounded-2xl p-4 2xl:col-span-3">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-sm font-semibold text-white">Recent Activity Feed</h3>
+                  <span class="text-xs text-slate-400">Last 50 entries</span>
+                </div>
+                <div id="recent-activity-list" class="activity-feed mt-3 space-y-2 pr-1"></div>
+              </article>
+
+              <article class="agent-stat-card panel-card rounded-2xl p-4 2xl:col-span-2">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-sm font-semibold text-white">Model Usage Tracker</h3>
+                  <span class="text-xs text-slate-400">From agent_logs</span>
+                </div>
+
+                <div class="mt-3 overflow-hidden rounded-xl border border-white/10">
+                  <table class="min-w-full text-left text-xs md:text-sm">
+                    <thead class="bg-white/5 text-slate-300">
+                      <tr>
+                        <th class="px-3 py-2 font-medium">Agent</th>
+                        <th class="px-3 py-2 font-medium">Model</th>
+                        <th class="px-3 py-2 text-right font-medium">Tasks Today</th>
+                      </tr>
+                    </thead>
+                    <tbody id="model-usage-body" class="divide-y divide-white/10 bg-slate-950/35"></tbody>
+                  </table>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="panel-tasks" class="tab-panel">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div class="panel-card gradient-border glass h-40 rounded-2xl"></div>
+            <div class="panel-card gradient-border glass h-40 rounded-2xl"></div>
+            <div class="panel-card gradient-border glass h-40 rounded-2xl"></div>
+          </div>
+        </section>
+
+        <section id="panel-settings" class="tab-panel">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div class="panel-card gradient-border glass h-56 rounded-2xl"></div>
+            <div class="panel-card gradient-border glass h-56 rounded-2xl"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      // Supabase shell initialization (safe and non-blocking for UI)
+      const SUPABASE_URL = window.SUPABASE_URL || "YOUR_SUPABASE_URL";
+      const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "YOUR_SUPABASE_ANON_KEY";
+      let supabaseClient = null;
+
+      try {
+        if (
+          window.supabase &&
+          SUPABASE_URL &&
+          SUPABASE_ANON_KEY &&
+          SUPABASE_URL !== "YOUR_SUPABASE_URL" &&
+          SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY"
+        ) {
+          supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        }
+      } catch (e) {
+        console.warn("Supabase init skipped:", e);
+      }
+
+      const CEIL_AGENTS = [
+        {
+          emoji: "🧭",
+          name: "Workspace Manager",
+          subtitle: "Primary Coordinator",
+          color: "#4F46E5",
+          aliases: ["workspace manager", "workspace-manager", "workspace_manager"],
+        },
+        {
+          emoji: "🧪",
+          name: "Senku Ishigami",
+          subtitle: "Scientific Execution",
+          color: "#EC4899",
+          aliases: ["senku ishigami", "senku-ishigami", "senku_ishigami", "senku"],
+        },
+        {
+          emoji: "🧩",
+          name: "Workspace Orchestrator",
+          subtitle: "Workflow Coordination",
+          color: "#6366F1",
+          aliases: ["workspace orchestrator", "workspace-orchestrator", "workspace_orchestrator", "orchestrator"],
+        },
+        {
+          emoji: "🏗️",
+          name: "Provisioning Architect",
+          subtitle: "Provisioning Lead",
+          color: "#06B6D4",
+          aliases: ["provisioning architect", "provisioning-architect", "provisioning_architect", "provisioning lead", "provisioning"],
+        },
+        {
+          emoji: "🛡️",
+          name: "Security & Compliance",
+          subtitle: "Security and Policy",
+          color: "#EF4444",
+          aliases: ["security & compliance", "security and compliance", "security compliance", "security/compliance", "security-compliance", "security_compliance"],
+        },
+        {
+          emoji: "🛰️",
+          name: "Reliability / SRE",
+          subtitle: "Operations Reliability",
+          color: "#10B981",
+          aliases: ["reliability / sre", "reliability sre", "reliability-sre", "reliability_sre", "reliability", "sre"],
+        },
+        {
+          emoji: "💰",
+          name: "Cost & Model Governor",
+          subtitle: "Budget and Model Control",
+          color: "#F59E0B",
+          aliases: ["cost & model governor", "cost model governor", "cost-model-governor", "cost_model_governor", "model governor", "cost governor"],
+        },
+        {
+          emoji: "✅",
+          name: "Quality Auditor",
+          subtitle: "Readiness and Coherence",
+          color: "#7C3AED",
+          aliases: ["quality auditor", "quality-auditor", "quality_auditor", "auditor", "quality"],
+        },
+        {
+          emoji: "🖥️",
+          name: "OS Monitor",
+          subtitle: "Per-OS Monitoring",
+          color: "#14B8A6",
+          aliases: ["os monitor", "os-monitor", "os_monitor", "monitor", "system monitor"],
+        },
+      ];
+
+      const AGENT_LOOKUP = new Map(CEIL_AGENTS.map((agent) => [normalizeAgentName(agent.name), agent]));
+      const AGENT_ALIAS_INDEX = CEIL_AGENTS.map((agent) => ({
+        agent,
+        aliases: [...new Set([agent.name, ...(agent.aliases || [])].map((item) => normalizeAgentName(item)).filter(Boolean))],
+      }));
+
+      const nav = document.getElementById("tab-nav");
+      const tabPill = document.getElementById("tab-pill");
+      const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
+      const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
+
+      const statTotalTodayEl = document.getElementById("stat-total-today");
+      const statTotalWeekEl = document.getElementById("stat-total-week");
+      const statMostActiveEl = document.getElementById("stat-most-active");
+      const statSuccessRateEl = document.getElementById("stat-success-rate");
+      const agentCardsGridEl = document.getElementById("agents-card-grid");
+      const recentActivityEl = document.getElementById("recent-activity-list");
+      const modelUsageBodyEl = document.getElementById("model-usage-body");
+
+      function normalizeAgentName(name) {
+        return String(name || "")
+          .trim()
+          .replace(/\s+/g, " ")
+          .toLowerCase();
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function hexToRgba(hex, alpha) {
+        const normalized = String(hex || "").replace("#", "");
+        if (normalized.length !== 6) return `rgba(124,58,237,${alpha})`;
+        const r = Number.parseInt(normalized.slice(0, 2), 16);
+        const g = Number.parseInt(normalized.slice(2, 4), 16);
+        const b = Number.parseInt(normalized.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      }
+
+      function formatTimestamp(value) {
+        if (!value) return "No data yet";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "No data yet";
+        return date.toLocaleString();
+      }
+
+      function resolveAgentFromLogName(name) {
+        const normalized = normalizeAgentName(name);
+        if (!normalized) return null;
+
+        if (AGENT_LOOKUP.has(normalized)) {
+          return AGENT_LOOKUP.get(normalized);
+        }
+
+        let bestMatch = null;
+        let bestScore = 0;
+
+        for (const item of AGENT_ALIAS_INDEX) {
+          for (const alias of item.aliases) {
+            if (!alias) continue;
+
+            let score = 0;
+            if (normalized === alias) {
+              score = 100 + alias.length;
+            } else if (normalized.includes(alias)) {
+              score = alias.length;
+            } else if (alias.includes(normalized) && normalized.length >= 4) {
+              score = normalized.length - 1;
+            }
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = item.agent;
+            }
+          }
+        }
+
+        return bestMatch;
+      }
+
+      function getAgentMeta(name) {
+        return resolveAgentFromLogName(name);
+      }
+
+      function getStatusBadge(status) {
+        const raw = String(status || "").trim();
+        const normalized = raw.toLowerCase();
+
+        if (normalized.includes("fail")) {
+          return {
+            label: raw || "Failed",
+            klass: "border border-red-400/45 bg-red-500/20 text-red-200",
+          };
+        }
+
+        if (normalized.includes("complete")) {
+          return {
+            label: raw || "Completed",
+            klass: "border border-emerald-400/45 bg-emerald-500/20 text-emerald-200",
+          };
+        }
+
+        return {
+          label: raw || "N/A",
+          klass: "border border-slate-400/45 bg-slate-500/20 text-slate-200",
+        };
+      }
+
+      function startOfTodayISO() {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        return now.toISOString();
+      }
+
+      function startOfWeekISO() {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const day = now.getDay();
+        const mondayOffset = day === 0 ? 6 : day - 1;
+        now.setDate(now.getDate() - mondayOffset);
+        return now.toISOString();
+      }
+
+      function defaultAgentSummaries() {
+        return CEIL_AGENTS.map((agent) => ({ ...agent, latest: null, tasksToday: 0 }));
+      }
+
+      function setPill(btn) {
+        const navRect = nav.getBoundingClientRect();
+        const btnRect = btn.getBoundingClientRect();
+
+        tabPill.style.width = `${btnRect.width}px`;
+        tabPill.style.height = `${btnRect.height}px`;
+        tabPill.style.transform = `translate(${btnRect.left - navRect.left}px, ${btnRect.top - navRect.top}px)`;
+      }
+
+      function staggerActivePanelCards() {
+        const activePanel = document.querySelector(".tab-panel.active");
+        if (!activePanel) return;
+
+        const cards = Array.from(activePanel.querySelectorAll(".panel-card"));
+        cards.forEach((card, index) => {
+          card.classList.remove("animate-fadeSlideIn");
+          card.style.opacity = "0";
+          card.style.transform = "translateY(14px)";
+
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              card.classList.add("animate-fadeSlideIn");
+            }, index * 75);
+          });
+        });
+      }
+
+      function activateTab(tabName) {
+        let activeBtn = null;
+
+        tabButtons.forEach((btn) => {
+          const isActive = btn.dataset.tab === tabName;
+          btn.classList.toggle("active", isActive);
+          if (isActive) {
+            activeBtn = btn;
+            setPill(btn);
+          }
+        });
+
+        tabPanels.forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `panel-${tabName}`);
+        });
+
+        if (activeBtn) {
+          activeBtn.classList.remove("tab-press");
+          void activeBtn.offsetWidth;
+          activeBtn.classList.add("tab-press");
+
+          tabPill.classList.remove("pill-pulse");
+          void tabPill.offsetWidth;
+          tabPill.classList.add("pill-pulse");
+        }
+
+        if (tabName === "agents") {
+          scheduleAgentRefresh();
+        }
+
+        staggerActivePanelCards();
+      }
+
+      function renderStats({ totalToday, totalWeek, mostActive, successRate }) {
+        if (statTotalTodayEl) statTotalTodayEl.textContent = String(totalToday);
+        if (statTotalWeekEl) statTotalWeekEl.textContent = String(totalWeek);
+        if (statMostActiveEl) statMostActiveEl.textContent = mostActive;
+        if (statSuccessRateEl) statSuccessRateEl.textContent = successRate;
+      }
+
+      function renderAgentCards(agentSummaries) {
+        if (!agentCardsGridEl) return;
+
+        agentCardsGridEl.innerHTML = agentSummaries
+          .map((agent) => {
+            const latest = agent.latest || null;
+            const model = latest?.model_used ? escapeHtml(latest.model_used) : "N/A";
+            const task = latest?.task_description ? escapeHtml(latest.task_description) : "No data yet";
+            const lastActive = latest?.created_at ? formatTimestamp(latest.created_at) : "No data yet";
+
+            return `
+              <article
+                class="agent-card panel-card rounded-2xl p-4"
+                style="
+                  --agent-border: ${hexToRgba(agent.color, 0.58)};
+                  --agent-ring: ${hexToRgba(agent.color, 0.25)};
+                  --agent-shadow: ${hexToRgba(agent.color, 0.22)};
+                "
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-base font-bold text-white">${agent.emoji} ${escapeHtml(agent.name)}</p>
+                    <p class="mt-0.5 text-xs text-slate-300/85">${escapeHtml(agent.subtitle)}</p>
+                  </div>
+
+                  <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-1 text-[11px] font-medium text-emerald-200">
+                    <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+                    Connected
+                  </span>
+                </div>
+
+                <div class="mt-4 space-y-2 text-xs">
+                  <div class="flex items-start justify-between gap-3">
+                    <span class="text-slate-400">Model</span>
+                    <span class="text-right font-medium text-slate-100">${model}</span>
+                  </div>
+                  <div class="flex items-start justify-between gap-3">
+                    <span class="text-slate-400">Last task</span>
+                    <span class="max-w-[65%] text-right font-medium text-slate-100">${task}</span>
+                  </div>
+                  <div class="flex items-start justify-between gap-3">
+                    <span class="text-slate-400">Last active</span>
+                    <span class="text-right font-medium text-slate-100">${escapeHtml(lastActive)}</span>
+                  </div>
+                  <div class="flex items-start justify-between gap-3">
+                    <span class="text-slate-400">Tasks today</span>
+                    <span class="font-semibold text-white">${agent.tasksToday}</span>
+                  </div>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      function renderRecentActivity(logs) {
+        if (!recentActivityEl) return;
+
+        if (!Array.isArray(logs) || logs.length === 0) {
+          recentActivityEl.innerHTML =
+            '<div class="empty-note rounded-xl px-4 py-6 text-center text-sm">No data yet</div>';
+          return;
+        }
+
+        recentActivityEl.innerHTML = logs
+          .map((entry) => {
+            const meta = getAgentMeta(entry.agent_name);
+            const accent = meta?.color || "#64748B";
+            const status = getStatusBadge(entry.status);
+            const task = entry.task_description ? escapeHtml(entry.task_description) : "No data yet";
+            const model = entry.model_used ? escapeHtml(entry.model_used) : "N/A";
+
+            return `
+              <article class="rounded-xl border border-white/10 bg-slate-900/40 p-3" style="border-left: 3px solid ${accent};">
+                <div class="flex items-start justify-between gap-2">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold"
+                    style="background:${hexToRgba(accent, 0.2)}; border:1px solid ${hexToRgba(accent, 0.45)}; color:${accent};"
+                  >
+                    ${escapeHtml(entry.agent_name || "Unknown Agent")}
+                  </span>
+
+                  <span class="whitespace-nowrap text-[11px] text-slate-400">${escapeHtml(formatTimestamp(entry.created_at))}</span>
+                </div>
+
+                <p class="mt-2 text-sm font-medium text-slate-100">${task}</p>
+
+                <div class="mt-2 flex items-center justify-between gap-2">
+                  <span class="text-xs text-slate-300">Model: ${model}</span>
+                  <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${status.klass}">
+                    ${escapeHtml(status.label)}
+                  </span>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      function renderModelUsage(agentSummaries) {
+        if (!modelUsageBodyEl) return;
+
+        if (!Array.isArray(agentSummaries) || agentSummaries.length === 0) {
+          modelUsageBodyEl.innerHTML =
+            '<tr><td colspan="3" class="px-3 py-3 text-center text-slate-300">No data yet</td></tr>';
+          return;
+        }
+
+        modelUsageBodyEl.innerHTML = agentSummaries
+          .map((agent) => {
+            const model = agent.latest?.model_used ? escapeHtml(agent.latest.model_used) : "N/A";
+            return `
+              <tr class="text-slate-200">
+                <td class="px-3 py-2 text-xs md:text-sm">${escapeHtml(agent.name)}</td>
+                <td class="px-3 py-2 text-xs md:text-sm">${model}</td>
+                <td class="px-3 py-2 text-right text-xs font-semibold md:text-sm">${agent.tasksToday}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function renderAgentsView(payload) {
+        renderStats({
+          totalToday: payload.totalToday,
+          totalWeek: payload.totalWeek,
+          mostActive: payload.mostActive,
+          successRate: payload.successRate,
+        });
+
+        renderAgentCards(payload.agentSummaries);
+        renderRecentActivity(payload.recentLogs);
+        renderModelUsage(payload.agentSummaries);
+
+        const panelAgents = document.getElementById("panel-agents");
+        if (panelAgents && panelAgents.classList.contains("active")) {
+          staggerActivePanelCards();
+        }
+      }
+
+      async function loadAgentData() {
+        const fallback = {
+          agentSummaries: defaultAgentSummaries(),
+          recentLogs: [],
+          totalToday: 0,
+          totalWeek: 0,
+          mostActive: "N/A",
+          successRate: "N/A",
+        };
+
+        if (!supabaseClient) {
+          renderAgentsView(fallback);
+          return;
+        }
+
+        const todayISO = startOfTodayISO();
+        const weekISO = startOfWeekISO();
+
+        try {
+          const [recentRes, todayRes, weekRes, weekSuccessRes, latestPoolRes, todayLogsRes] = await Promise.all([
+            supabaseClient
+              .from("agent_logs")
+              .select("agent_name, task_description, model_used, status, created_at")
+              .order("created_at", { ascending: false })
+              .limit(50),
+            supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", todayISO),
+            supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO),
+            supabaseClient
+              .from("agent_logs")
+              .select("*", { count: "exact", head: true })
+              .gte("created_at", weekISO)
+              .ilike("status", "%completed%"),
+            supabaseClient
+              .from("agent_logs")
+              .select("agent_name, task_description, model_used, status, created_at")
+              .order("created_at", { ascending: false })
+              .limit(1000),
+            supabaseClient
+              .from("agent_logs")
+              .select("agent_name, created_at")
+              .gte("created_at", todayISO)
+              .limit(5000),
+          ]);
+
+          if (recentRes.error) throw recentRes.error;
+          if (todayRes.error) throw todayRes.error;
+          if (weekRes.error) throw weekRes.error;
+          if (weekSuccessRes.error) throw weekSuccessRes.error;
+          if (latestPoolRes.error) throw latestPoolRes.error;
+          if (todayLogsRes.error) throw todayLogsRes.error;
+
+          const agentSummaries = CEIL_AGENTS.map((agent) => ({
+            ...agent,
+            latest: null,
+            tasksToday: 0,
+          }));
+          const summaryByName = new Map(agentSummaries.map((agent) => [agent.name, agent]));
+
+          for (const entry of latestPoolRes.data || []) {
+            const meta = resolveAgentFromLogName(entry.agent_name);
+            if (!meta) continue;
+
+            const summary = summaryByName.get(meta.name);
+            if (summary && !summary.latest) {
+              summary.latest = entry;
+            }
+          }
+
+          for (const entry of todayLogsRes.data || []) {
+            const meta = resolveAgentFromLogName(entry.agent_name);
+            if (!meta) continue;
+
+            const summary = summaryByName.get(meta.name);
+            if (summary) {
+              summary.tasksToday += 1;
+            }
+          }
+
+          const mostActiveEntry = agentSummaries.reduce((max, current) =>
+            current.tasksToday > max.tasksToday ? current : max
+          );
+
+          if ((todayRes.count || 0) > 0 && agentSummaries.every((agent) => agent.tasksToday === 0)) {
+            const distinctNames = [...new Set((todayLogsRes.data || []).map((row) => normalizeAgentName(row.agent_name)).filter(Boolean))];
+            console.warn("agent_logs names did not match configured agents:", distinctNames);
+          }
+
+          const totalWeek = weekRes.count || 0;
+          const successfulWeek = weekSuccessRes.count || 0;
+          const successRate = totalWeek > 0 ? `${((successfulWeek / totalWeek) * 100).toFixed(1)}%` : "N/A";
+
+          renderAgentsView({
+            agentSummaries,
+            recentLogs: recentRes.data || [],
+            totalToday: todayRes.count || 0,
+            totalWeek,
+            mostActive:
+              mostActiveEntry && mostActiveEntry.tasksToday > 0
+                ? `${mostActiveEntry.name} (${mostActiveEntry.tasksToday})`
+                : "N/A",
+            successRate,
+          });
+        } catch (error) {
+          console.error("Failed to load agent_logs:", error);
+          renderAgentsView(fallback);
+        }
+      }
+
+      let agentRefreshTimer = null;
+      function scheduleAgentRefresh() {
+        clearTimeout(agentRefreshTimer);
+        agentRefreshTimer = setTimeout(() => {
+          loadAgentData();
+        }, 220);
+      }
+
+      let agentLogsChannel = null;
+      function setupAgentRealtime() {
+        if (!supabaseClient || agentLogsChannel) return;
+
+        agentLogsChannel = supabaseClient
+          .channel("agent-logs-live")
+          .on("postgres_changes", { event: "*", schema: "public", table: "agent_logs" }, () => {
+            scheduleAgentRefresh();
+          })
+          .subscribe();
+      }
+
+      tabButtons.forEach((button) => {
+        button.addEventListener("click", () => activateTab(button.dataset.tab));
+        button.addEventListener("animationend", () => button.classList.remove("tab-press"));
+      });
+
+      tabPill.addEventListener("animationend", () => tabPill.classList.remove("pill-pulse"));
+
+      window.addEventListener("resize", () => {
+        const activeButton = document.querySelector(".tab-btn.active");
+        if (activeButton) setPill(activeButton);
+      });
+
+      // Initial render
+      const initialActive = document.querySelector(".tab-btn.active");
+      if (initialActive) setPill(initialActive);
+      staggerActivePanelCards();
+
+      renderAgentsView({
+        agentSummaries: defaultAgentSummaries(),
+        recentLogs: [],
+        totalToday: 0,
+        totalWeek: 0,
+        mostActive: "N/A",
+        successRate: "N/A",
+      });
+
+      setupAgentRealtime();
+      scheduleAgentRefresh();
+    </script>
+  </body>
+</html>

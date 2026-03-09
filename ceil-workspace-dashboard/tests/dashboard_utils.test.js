@@ -1,0 +1,106 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const utils = require('../dashboard-utils.js');
+
+const AGENTS = [
+  {
+    name: 'Workspace Manager',
+    aliases: ['workspace-manager', 'workspace manager', 'workspace_manager'],
+    color: '#4F46E5',
+  },
+  {
+    name: 'Senku Ishigami',
+    aliases: ['senku-ishigami', 'senku ishigami', 'senku'],
+    color: '#EC4899',
+  },
+  {
+    name: 'Security & Compliance',
+    aliases: ['security-compliance', 'security and compliance', 'security/compliance'],
+    color: '#EF4444',
+  },
+];
+
+const RUNTIME_CONFIG = {
+  participantToSlug: {
+    'Workspace Manager': 'workspace-manager',
+    'Senku Ishigami': 'senku-ishigami',
+  },
+  canonicalSlugs: ['workspace-manager', 'senku-ishigami', 'security-compliance'],
+};
+
+test('normalizeAgentName trims, compresses spaces, and lowercases', () => {
+  assert.equal(utils.normalizeAgentName('  Senku   Ishigami  '), 'senku ishigami');
+});
+
+test('agentSlugFromName respects participant mapping and canonical slugs', () => {
+  assert.equal(utils.agentSlugFromName('Workspace Manager', RUNTIME_CONFIG), 'workspace-manager');
+  assert.equal(utils.agentSlugFromName('Security / Compliance', RUNTIME_CONFIG), 'security-compliance');
+  assert.equal(utils.agentSlugFromName('Unknown Agent', RUNTIME_CONFIG), null);
+});
+
+test('sessionLabelForName falls back to normalized hyphenated label', () => {
+  assert.equal(utils.sessionLabelForName('New Agent Name', RUNTIME_CONFIG), 'new-agent-name');
+});
+
+test('escapeHtml escapes critical characters', () => {
+  assert.equal(utils.escapeHtml(`<'\"&>`), '&lt;&#39;&quot;&amp;&gt;');
+});
+
+test('hexToRgba converts hex and falls back for invalid input', () => {
+  assert.equal(utils.hexToRgba('#ffffff', 0.5), 'rgba(255, 255, 255, 0.5)');
+  assert.equal(utils.hexToRgba('#fff', 0.3), 'rgba(124,58,237,0.3)');
+});
+
+test('createAgentResolver matches direct aliases and fuzzy log names', () => {
+  const resolver = utils.createAgentResolver(AGENTS);
+  assert.equal(resolver.resolveAgentFromLogName('senku-ishigami').name, 'Senku Ishigami');
+  assert.equal(resolver.resolveAgentFromLogName('nightly run by workspace-manager').name, 'Workspace Manager');
+  assert.equal(resolver.getAgentMeta('security/compliance').name, 'Security & Compliance');
+  assert.equal(resolver.resolveAgentFromLogName('totally unknown'), null);
+});
+
+test('getStatusBadge classifies failed, completed, and fallback states', () => {
+  assert.equal(utils.getStatusBadge('failed').label, 'failed');
+  assert.match(utils.getStatusBadge('failed').klass, /red/);
+  assert.match(utils.getStatusBadge('completed').klass, /emerald/);
+  assert.match(utils.getStatusBadge('queued').klass, /slate/);
+});
+
+test('startOfTodayISO and startOfWeekISO reset to local day/week boundaries', () => {
+  const input = new Date('2026-03-08T15:22:11.000Z');
+  const today = new Date(utils.startOfTodayISO(input));
+  const week = new Date(utils.startOfWeekISO(input));
+
+  assert.equal(today.getHours(), 0);
+  assert.equal(today.getMinutes(), 0);
+  assert.equal(today.getSeconds(), 0);
+  assert.equal(today.getMilliseconds(), 0);
+  assert.equal(today.getFullYear(), input.getFullYear());
+  assert.equal(today.getMonth(), input.getMonth());
+  assert.equal(today.getDate(), input.getDate());
+
+  assert.equal(week.getHours(), 0);
+  assert.equal(week.getMinutes(), 0);
+  assert.equal(week.getSeconds(), 0);
+  assert.equal(week.getMilliseconds(), 0);
+  assert.equal(week.getDay(), 1);
+});
+
+test('housekeeping and completion helpers classify tasks correctly', () => {
+  assert.equal(utils.isHousekeepingTask({ task_description: 'Heartbeat check' }), true);
+  assert.equal(utils.isCompletedLikeStatus('resolved'), true);
+  assert.equal(utils.isCompletedLikeStatus('running'), false);
+  assert.equal(
+    utils.isCountableTask({ task_description: 'Build dashboard widgets', status: 'completed' }),
+    true,
+  );
+  assert.equal(
+    utils.isCountableTask({ task_description: 'Supabase logging smoke test', status: 'completed' }),
+    false,
+  );
+});
+
+test('formatTimestamp returns fallback for empty or invalid values', () => {
+  assert.equal(utils.formatTimestamp(''), 'No data yet');
+  assert.equal(utils.formatTimestamp('not-a-date'), 'No data yet');
+});

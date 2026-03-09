@@ -1,0 +1,17 @@
+# HEARTBEAT — Activity Log
+
+Events: PROVISIONING_STARTED, RESEARCH_COMPLETED, DESIGN_SPEC_COMPLETED, FILES_GENERATED, SCAFFOLD_COMPLETED, VALIDATION_PASSED, PROVISIONING_COMPLETED, PROVISIONING_FAILED.
+
+---
+## Legacy Preserved Notes
+
+# HEARTBEAT.md
+
+# Keep this file empty (or with only comments) to skip heartbeat API calls.
+
+# Add tasks below when you want the agent to check something periodically.
+
+
+## Imported Event Taxonomy (2026-03-03)
+- PROVISIONING_STARTED, RESEARCH_COMPLETED, DESIGN_SPEC_COMPLETED, FILES_GENERATED, SCAFFOLD_COMPLETED, VALIDATION_PASSED, PROVISIONING_COMPLETED/FAILED.
+

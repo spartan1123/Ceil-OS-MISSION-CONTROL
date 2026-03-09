@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "default": {
+    "crossAgentFileAccess": "deny",
+    "crossAgentMessaging": "allow-via-delegation",
+    "shell": "deny",
+    "network": "deny"
+  },
+  "broker": {
+    "agent": "workspace-manager",
+    "handoffRequired": true,
+    "redactionRequired": true,
+    "auditLog": "/root/.openclaw/workspace/agents/audit/handoffs.log"
+  },
+  "agents": {
+    "workspace-manager": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/workspace-manager",
+      "allowTools": ["sessions_spawn", "sessions_send", "sessions_list", "read", "write", "edit", "memory_search", "memory_get"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "provisioning-architect": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/provisioning-architect",
+      "allowTools": ["read", "write", "edit"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "security-compliance": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/security-compliance",
+      "allowTools": ["read", "write", "edit"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "reliability-sre": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/reliability-sre",
+      "allowTools": ["read", "write", "edit"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "cost-model-governor": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/cost-model-governor",
+      "allowTools": ["read", "write", "edit", "session_status"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "quality-auditor": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/quality-auditor",
+      "allowTools": ["read", "write", "edit"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "os-monitor-template": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/os-monitor-template",
+      "allowTools": ["read", "write", "edit", "cron"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "research-search": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/research-search",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false,
+      "network": "allow",
+      "secrets": ["/root/.openclaw/workspace/.secrets/brave.env"]
+    },
+    "workspace-orchestrator": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/workspace-orchestrator",
+      "allowTools": ["sessions_spawn", "sessions_send", "sessions_list", "read", "write", "edit", "memory_search", "memory_get"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "senku-ishigami": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/senku-ishigami",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    },
+    "os-monitor": {
+      "workspaceRoot": "/root/.openclaw/workspace/agents/os-monitor",
+      "allowTools": ["read", "write", "edit", "cron", "memory_search", "memory_get"],
+      "allowCrossAgentRead": false,
+      "allowCrossAgentWrite": false
+    }
+  }
+}

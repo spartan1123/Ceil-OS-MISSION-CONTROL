@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "defaults": {
+    "sandbox": "require",
+    "crossAgentFileAccess": "deny",
+    "network": "deny",
+    "shell": "deny"
+  },
+  "secrets": {
+    "mountMode": "explicit",
+    "allowedSecretFiles": [
+      "/root/.openclaw/workspace/.secrets/brave.env"
+    ]
+  },
+  "agents": {
+    "workspace-manager": {
+      "cwd": "/root/.openclaw/workspace/agents/workspace-manager",
+      "allowTools": ["sessions_spawn", "sessions_send", "sessions_list", "read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "provisioning-architect": {
+      "cwd": "/root/.openclaw/workspace/agents/provisioning-architect",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "security-compliance": {
+      "cwd": "/root/.openclaw/workspace/agents/security-compliance",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "reliability-sre": {
+      "cwd": "/root/.openclaw/workspace/agents/reliability-sre",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "cost-model-governor": {
+      "cwd": "/root/.openclaw/workspace/agents/cost-model-governor",
+      "allowTools": ["read", "write", "edit", "session_status", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "quality-auditor": {
+      "cwd": "/root/.openclaw/workspace/agents/quality-auditor",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "os-monitor-template": {
+      "cwd": "/root/.openclaw/workspace/agents/os-monitor-template",
+      "allowTools": ["read", "write", "edit", "cron", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "research-search": {
+      "cwd": "/root/.openclaw/workspace/agents/research-search",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "network": "allow",
+      "shell": "deny",
+      "secrets": ["/root/.openclaw/workspace/.secrets/brave.env"]
+    },
+    "workspace-orchestrator": {
+      "cwd": "/root/.openclaw/workspace/agents/workspace-orchestrator",
+      "allowTools": ["sessions_spawn", "sessions_send", "sessions_list", "read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "senku-ishigami": {
+      "cwd": "/root/.openclaw/workspace/agents/senku-ishigami",
+      "allowTools": ["read", "write", "edit", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    },
+    "os-monitor": {
+      "cwd": "/root/.openclaw/workspace/agents/os-monitor",
+      "allowTools": ["read", "write", "edit", "cron", "memory_search", "memory_get"],
+      "network": "deny",
+      "shell": "deny"
+    }
+  }
+}
