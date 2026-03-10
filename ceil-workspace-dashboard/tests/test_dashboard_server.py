@@ -321,6 +321,84 @@ class FakeArtifactStore:
 
 
 class CouncilOrchestratorProtocolTests(unittest.TestCase):
+    def _make_orchestrator(self):
+        return council_orchestrator.CouncilOrchestrator(
+            event_bus=dashboard_server.CouncilEventBus(),
+            tools_url_for_port=lambda _port: "http://unused",
+            token_for_port=lambda _port: "token",
+            port_for_slug=lambda _slug: 18789,
+            participant_slug_map={"Workspace Manager": "workspace-manager", "Senku Ishigami": "senku-ishigami"},
+            artifact_store=FakeArtifactStore(),
+        )
+
+    def test_sessions_list_parses_nested_gateway_result_envelope(self):
+        orchestrator = self._make_orchestrator()
+        orchestrator._invoke_tool = lambda *_args, **_kwargs: {  # type: ignore[attr-defined]
+            "ok": True,
+            "result": {
+                "details": {
+                    "sessions": [
+                        {"key": "agent:main:main", "kind": "other"},
+                        {
+                            "key": "agent:main:discord:channel:123",
+                            "kind": "group",
+                            "displayName": "discord:team#workspace-manager",
+                        },
+                    ]
+                }
+            },
+        }
+
+        sessions = orchestrator._sessions_list(19001)
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual(sessions[1]["key"], "agent:main:discord:channel:123")
+
+    def test_resolve_session_key_reuses_existing_group_session_from_nested_result(self):
+        orchestrator = self._make_orchestrator()
+        orchestrator._invoke_tool = lambda *_args, **_kwargs: {  # type: ignore[attr-defined]
+            "ok": True,
+            "result": {
+                "details": {
+                    "sessions": [
+                        {"key": "agent:main:main", "kind": "other"},
+                        {
+                            "key": "agent:main:discord:channel:123",
+                            "kind": "group",
+                            "displayName": "discord:team#workspace-manager",
+                        },
+                    ]
+                }
+            },
+        }
+
+        session_key = orchestrator._resolve_session_key("workspace-manager", 19001)
+        self.assertEqual(session_key, "agent:main:discord:channel:123")
+
+    def test_resolve_session_key_prefers_group_when_display_name_matches_multiple_sessions(self):
+        orchestrator = self._make_orchestrator()
+        orchestrator._invoke_tool = lambda *_args, **_kwargs: {  # type: ignore[attr-defined]
+            "ok": True,
+            "result": {
+                "details": {
+                    "sessions": [
+                        {
+                            "key": "agent:main:subagent:abc",
+                            "kind": "other",
+                            "displayName": "discord:team#senku-ishigami",
+                        },
+                        {
+                            "key": "agent:main:discord:channel:456",
+                            "kind": "group",
+                            "displayName": "discord:team#senku-ishigami",
+                        },
+                    ]
+                }
+            },
+        }
+
+        session_key = orchestrator._resolve_session_key("senku-ishigami", 19101)
+        self.assertEqual(session_key, "agent:main:discord:channel:456")
+
     def test_multi_round_protocol_emits_round_and_artifact_events(self):
         event_bus = dashboard_server.CouncilEventBus()
         store = FakeArtifactStore()
@@ -376,6 +454,59 @@ class CouncilOrchestratorProtocolTests(unittest.TestCase):
         self.assertIn("critique", round_names)
         self.assertIn("synthesis", round_names)
         self.assertEqual(len(store.calls), 1)
+
+    def test_requester_session_key_collision_skips_recursive_send(self):
+        event_bus = dashboard_server.CouncilEventBus()
+        store = FakeArtifactStore()
+
+        orchestrator = council_orchestrator.CouncilOrchestrator(
+            event_bus=event_bus,
+            tools_url_for_port=lambda _port: "http://unused",
+            token_for_port=lambda _port: "token",
+            port_for_slug=lambda _slug: 18789,
+            participant_slug_map={"Workspace Manager": "workspace-manager", "Senku Ishigami": "senku-ishigami"},
+            artifact_store=store,
+        )
+
+        run = event_bus.create_run(
+            {
+                "id": "session-y",
+                "title": "Collision test",
+                "topic": "Avoid recursive self-send",
+                "participants": ["workspace-manager", "senku-ishigami"],
+                "requester_session_key": "agent:main:discord:channel:senku",
+            },
+            dashboard_server.now_iso(),
+        )
+
+        send_calls = []
+
+        def fake_send(_port, session_key, _message):
+            send_calls.append(session_key)
+            return {"details": {"status": "ok", "reply": f"reply from {session_key}"}}
+
+        def fake_resolve(slug, _port):
+            if slug == "senku-ishigami":
+                return "agent:main:discord:channel:senku"
+            return f"agent:main:discord:channel:{slug}"
+
+        orchestrator._resolve_session_key = fake_resolve  # type: ignore[attr-defined]
+        orchestrator._send_message = fake_send  # type: ignore[attr-defined]
+
+        orchestrator._run(run.run_id)
+
+        state = event_bus.get_run(run.run_id)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.status, "completed")
+        self.assertNotIn("agent:main:discord:channel:senku", send_calls)
+        self.assertTrue(send_calls)
+        self.assertEqual(store.calls[0][1]["failure_count"], 3)
+        self.assertEqual(store.calls[0][1]["success_count"], 3)
+        self.assertTrue(any(
+            item["payload"].get("state") == "skipped" and item["payload"].get("agent_slug") == "senku-ishigami"
+            for item in state.history
+            if item["type"] == "participant.status"
+        ))
 
 
 if __name__ == "__main__":

@@ -31,6 +31,10 @@ def participant_display(slug_or_name: str, participant_map: dict[str, str]) -> s
     return raw
 
 
+def normalize_session_key(value: Any) -> str:
+    return str(value or "").strip()
+
+
 class CouncilOrchestrator:
     def __init__(
         self,
@@ -88,17 +92,47 @@ class CouncilOrchestrator:
             return result
         if isinstance(result, dict) and isinstance(result.get("details", {}).get("sessions"), list):
             return result["details"]["sessions"]
+        if isinstance(result, dict):
+            nested_result = result.get("result")
+            if isinstance(nested_result, dict):
+                if isinstance(nested_result.get("data"), list):
+                    return nested_result["data"]
+                if isinstance(nested_result.get("details", {}).get("sessions"), list):
+                    return nested_result["details"]["sessions"]
         return []
 
     def _resolve_session_key(self, slug: str, port: int) -> str:
         sessions = self._sessions_list(port)
         normalized_slug = normalize_name(slug)
+        matched_group = ""
+        matched_other = ""
+        group_fallback = ""
+        main_fallback = ""
+
         for row in sessions:
-            label = normalize_name(str(row.get("label") or row.get("sessionLabel") or row.get("name") or ""))
             session_key = str(row.get("sessionKey") or row.get("key") or row.get("id") or "")
-            if label == normalized_slug and session_key:
+            if not session_key:
+                continue
+
+            label = normalize_name(str(row.get("label") or row.get("sessionLabel") or row.get("name") or ""))
+            display_name = normalize_name(str(row.get("displayName") or ""))
+            kind = normalize_name(str(row.get("kind") or ""))
+
+            if label == normalized_slug:
                 return session_key
-        return ""
+
+            if normalized_slug and normalized_slug in display_name:
+                if kind == "group" and not matched_group:
+                    matched_group = session_key
+                elif not matched_other:
+                    matched_other = session_key
+
+            if not group_fallback and kind == "group":
+                group_fallback = session_key
+            if not main_fallback and session_key == "agent:main:main":
+                main_fallback = session_key
+
+        return matched_group or matched_other or group_fallback or main_fallback
 
     def _spawn_session(self, slug: str, port: int) -> str:
         task = (
@@ -130,6 +164,34 @@ class CouncilOrchestrator:
             "message": message,
             "timeoutSeconds": 300,
         })
+
+    def _requester_session_keys(self, payload: dict[str, Any]) -> set[str]:
+        candidates: set[str] = set()
+        direct_keys = (
+            "requester_session_key",
+            "active_session_key",
+            "source_session_key",
+            "current_session_key",
+            "session_key",
+        )
+        for key in direct_keys:
+            value = normalize_session_key(payload.get(key))
+            if value:
+                candidates.add(value)
+
+        for binding in payload.get("participant_bindings") or []:
+            if not isinstance(binding, dict):
+                continue
+            value = normalize_session_key(binding.get("session_key"))
+            if value and not value.startswith("local-"):
+                candidates.add(value)
+        return candidates
+
+    def _is_self_session_collision(self, payload: dict[str, Any], session_key: str) -> bool:
+        normalized_session_key = normalize_session_key(session_key)
+        if not normalized_session_key:
+            return False
+        return normalized_session_key in self._requester_session_keys(payload)
 
     def _publish_message(self, run_id: str, agent_slug: str, role: str, content: str) -> None:
         self.event_bus.publish(run_id, "message", {
@@ -260,6 +322,20 @@ class CouncilOrchestrator:
                 }
                 failed_agents.append(failure)
                 self._publish_participant(run_id, slug, "failed", failure["message"])
+                continue
+
+            if self._is_self_session_collision(payload, session_key):
+                failure = {
+                    "agent_slug": slug,
+                    "port": port,
+                    "tool": "sessions_send",
+                    "round": round_key,
+                    "error_type": "self_session_collision",
+                    "message": f"Skipped {slug}: resolved session matches active requester session.",
+                    "session_key": session_key,
+                }
+                failed_agents.append(failure)
+                self._publish_participant(run_id, slug, "skipped", failure["message"], session_key=session_key)
                 continue
 
             prompt = self._build_round_prompt(payload, slug, participants, round_key, context_packet, proposal_notes, critique_notes)
