@@ -1498,6 +1498,19 @@
         </section>
 
         <section id="panel-tasks" class="tab-panel">
+          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.16em] text-slate-500">Mission Control</p>
+              <h2 class="mt-1 text-xl font-extrabold text-white">Mission Queue</h2>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="mission-queue-refresh-btn" class="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10">Refresh</button>
+              <button id="mission-queue-new-btn" class="rounded-xl border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20">New Mission</button>
+            </div>
+          </div>
+
+          <div id="mission-queue-banner" class="mb-4 hidden rounded-2xl border px-4 py-3 text-sm"></div>
+
           <!-- Productivity Overview Bar -->
           <div id="tasks-overview-bar" class="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-5 py-3" style="max-height:130px;min-height:96px;">
             <!-- Donut chart -->
@@ -1506,15 +1519,15 @@
             </div>
             <!-- Stat cards -->
             <div class="flex flex-1 flex-wrap gap-3">
-              <div class="task-stat-card flex min-w-[90px] flex-col items-center justify-center rounded-xl border px-3 py-2" style="border-color:rgba(59,130,246,.45);background:rgba(59,130,246,.12);">
-                <span id="stat-todo-count" class="text-xl font-bold text-white">0</span>
-                <span class="text-[10px] font-semibold uppercase tracking-wide text-blue-300">To Do</span>
-                <span id="stat-todo-pct" class="text-[11px] text-blue-200">0%</span>
+              <div class="task-stat-card flex min-w-[90px] flex-col items-center justify-center rounded-xl border px-3 py-2" style="border-color:rgba(124,58,237,.45);background:rgba(124,58,237,.12);">
+                <span id="stat-queue-open-count" class="text-xl font-bold text-white">0</span>
+                <span class="text-[10px] font-semibold uppercase tracking-wide text-violet-300">Open</span>
+                <span id="stat-queue-open-pct" class="text-[11px] text-violet-200">0%</span>
               </div>
               <div class="task-stat-card flex min-w-[90px] flex-col items-center justify-center rounded-xl border px-3 py-2" style="border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.12);">
-                <span id="stat-doing-count" class="text-xl font-bold text-white">0</span>
-                <span class="text-[10px] font-semibold uppercase tracking-wide text-amber-300">Doing</span>
-                <span id="stat-doing-pct" class="text-[11px] text-amber-200">0%</span>
+                <span id="stat-queue-active-count" class="text-xl font-bold text-white">0</span>
+                <span class="text-[10px] font-semibold uppercase tracking-wide text-amber-300">Active</span>
+                <span id="stat-queue-active-pct" class="text-[11px] text-amber-200">0%</span>
               </div>
               <div class="task-stat-card flex min-w-[90px] flex-col items-center justify-center rounded-xl border px-3 py-2" style="border-color:rgba(16,185,129,.45);background:rgba(16,185,129,.12);">
                 <span id="stat-done-count" class="text-xl font-bold text-white">0</span>
@@ -1528,84 +1541,67 @@
 
           <!-- Filter bar -->
           <div class="mb-4 flex flex-wrap items-center gap-3">
-            <select id="tasks-filter-category" class="rounded-lg border border-white/15 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
-              <option value="">All Categories</option>
-              <option value="Governance">Governance</option>
-              <option value="Provisioning">Provisioning</option>
-              <option value="Security">Security</option>
-              <option value="Reliability">Reliability</option>
-              <option value="Cost">Cost</option>
-              <option value="Quality">Quality</option>
-              <option value="Monitoring">Monitoring</option>
+            <select id="tasks-filter-assignee" class="rounded-lg border border-white/15 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <option value="">All Assignees</option>
             </select>
             <select id="tasks-filter-priority" class="rounded-lg border border-white/15 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
               <option value="">All Priorities</option>
-              <option value="Urgent">Urgent</option>
-              <option value="Normal">Normal</option>
-              <option value="Someday">Someday</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+            </select>
+            <select id="tasks-filter-status" class="rounded-lg border border-white/15 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <option value="">All Statuses</option>
+              <option value="planning">Planning</option>
+              <option value="inbox">Inbox</option>
+              <option value="assigned">Assigned</option>
+              <option value="in_progress">In Progress</option>
+              <option value="testing">Testing</option>
+              <option value="review">Review</option>
+              <option value="verification">Verification</option>
+              <option value="done">Done</option>
+            </select>
+            <select id="tasks-filter-type" class="rounded-lg border border-white/15 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
+              <option value="">All Types</option>
+              <option value="general">General</option>
+              <option value="provision_workspace">Provision Workspace</option>
             </select>
           </div>
 
-          <!-- Kanban board -->
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <!-- To Do -->
-            <div class="kanban-column flex flex-col rounded-2xl border border-white/10 bg-white/[0.035] p-3" data-status="todo" id="kanban-col-todo">
-              <div class="mb-3 flex items-center justify-between px-1">
-                <span class="text-sm font-bold text-white">To Do</span>
-                <span id="kanban-count-todo" class="rounded-full bg-blue-500/25 px-2 py-0.5 text-xs font-semibold text-blue-200">0</span>
-              </div>
-              <div class="kanban-card-list min-h-[120px] flex-1 space-y-3" id="kanban-list-todo"></div>
-              <button class="kanban-add-btn mt-3 w-full rounded-xl border border-dashed border-white/20 py-2 text-xs font-medium text-slate-400 transition hover:border-violet-400/50 hover:text-violet-300" data-col="todo">+ Add Task</button>
-              <div class="kanban-inline-form mt-2 hidden" data-col="todo"></div>
-            </div>
-
-            <!-- Doing -->
-            <div class="kanban-column flex flex-col rounded-2xl border border-white/10 bg-white/[0.035] p-3" data-status="in_progress" id="kanban-col-in_progress">
-              <div class="mb-3 flex items-center justify-between px-1">
-                <span class="text-sm font-bold text-white">Doing</span>
-                <span id="kanban-count-in_progress" class="rounded-full bg-amber-500/25 px-2 py-0.5 text-xs font-semibold text-amber-200">0</span>
-              </div>
-              <div class="kanban-card-list min-h-[120px] flex-1 space-y-3" id="kanban-list-in_progress"></div>
-              <button class="kanban-add-btn mt-3 w-full rounded-xl border border-dashed border-white/20 py-2 text-xs font-medium text-slate-400 transition hover:border-violet-400/50 hover:text-violet-300" data-col="in_progress">+ Add Task</button>
-              <div class="kanban-inline-form mt-2 hidden" data-col="in_progress"></div>
-            </div>
-
-            <!-- Done -->
-            <div class="kanban-column flex flex-col rounded-2xl border border-white/10 bg-white/[0.035] p-3" data-status="done" id="kanban-col-done">
-              <div class="mb-3 flex items-center justify-between px-1">
-                <span class="text-sm font-bold text-white">Done</span>
-                <span id="kanban-count-done" class="rounded-full bg-emerald-500/25 px-2 py-0.5 text-xs font-semibold text-emerald-200">0</span>
-              </div>
-              <div class="kanban-card-list min-h-[120px] flex-1 space-y-3" id="kanban-list-done"></div>
-              <button class="kanban-add-btn mt-3 w-full rounded-xl border border-dashed border-white/20 py-2 text-xs font-medium text-slate-400 transition hover:border-violet-400/50 hover:text-violet-300" data-col="done">+ Add Task</button>
-              <div class="kanban-inline-form mt-2 hidden" data-col="done"></div>
-            </div>
+          <div class="overflow-x-auto pb-2">
+            <div id="mission-queue-board" class="grid min-w-[1680px] grid-cols-8 gap-4"></div>
           </div>
 
           <!-- Edit Task Modal -->
           <div id="task-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm">
             <div class="w-full max-w-md rounded-2xl border border-white/15 bg-slate-900 p-6 shadow-2xl">
-              <h3 class="mb-4 text-base font-bold text-white">Edit Task</h3>
+              <h3 id="mission-queue-modal-title" class="mb-4 text-base font-bold text-white">Edit Mission</h3>
               <div class="space-y-3">
                 <input id="edit-title" type="text" placeholder="Title" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500" />
-                <select id="edit-category" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
-                  <option value="Governance">Governance</option>
-                  <option value="Provisioning">Provisioning</option>
-                  <option value="Security">Security</option>
-                  <option value="Reliability">Reliability</option>
-                  <option value="Cost">Cost</option>
-                  <option value="Quality">Quality</option>
-                  <option value="Monitoring">Monitoring</option>
-                </select>
+                <textarea id="edit-description" placeholder="Description" class="min-h-[96px] w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500"></textarea>
                 <select id="edit-priority" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
-                  <option value="Urgent">Urgent</option>
-                  <option value="Normal">Normal</option>
-                  <option value="Someday">Someday</option>
+                  <option value="urgent">Urgent</option>
+                  <option value="high">High</option>
+                  <option value="normal">Normal</option>
+                  <option value="low">Low</option>
                 </select>
-                <select id="edit-track-status" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
-                  <option value="On Track">On Track</option>
-                  <option value="At Risk">At Risk</option>
-                  <option value="Off Track">Off Track</option>
+                <select id="edit-status" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+                  <option value="planning">Planning</option>
+                  <option value="inbox">Inbox</option>
+                  <option value="assigned">Assigned</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="testing">Testing</option>
+                  <option value="review">Review</option>
+                  <option value="verification">Verification</option>
+                  <option value="done">Done</option>
+                </select>
+                <select id="edit-task-type" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+                  <option value="general">General</option>
+                  <option value="provision_workspace">Provision Workspace</option>
+                </select>
+                <select id="edit-assignee" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+                  <option value="">Unassigned</option>
                 </select>
                 <input id="edit-due-date" type="date" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500" />
               </div>
@@ -1629,6 +1625,7 @@
     <script src="./dashboard-utils.js"></script>
     <script src="./dashboard-analytics.js"></script>
     <script src="./dashboard-dom.js"></script>
+    <script src="./dashboard-mission-queue.js"></script>
     <script>
       // Supabase shell initialization (safe and non-blocking for UI)
       const SUPABASE_URL = window.SUPABASE_URL || "YOUR_SUPABASE_URL";
@@ -5394,600 +5391,10 @@
     })();
     </script>
 
-    <!-- ═══════════════════════════════════════════════════
-         TASKS / KANBAN SCRIPT
-    ═══════════════════════════════════════════════════ -->
     <script>
-    (function () {
-      "use strict";
-
-      // ── Constants ──────────────────────────────────────────────────────────
-
-      const STATUS_COL = { todo: "todo", in_progress: "in_progress", done: "done" };
-
-      const CATEGORY_COLORS = {
-        Governance:   "#7C3AED",
-        Provisioning: "#06B6D4",
-        Security:     "#EF4444",
-        Reliability:  "#10B981",
-        Cost:         "#F59E0B",
-        Quality:      "#8B5CF6",
-        Monitoring:   "#14B8A6",
-      };
-
-      const PRIORITY_STYLES = {
-        Urgent:  { bg: "rgba(239,68,68,.18)",  border: "rgba(239,68,68,.5)",  text: "#FCA5A5" },
-        Normal:  { bg: "rgba(59,130,246,.18)", border: "rgba(59,130,246,.5)", text: "#93C5FD" },
-        Someday: { bg: "rgba(100,116,139,.18)",border: "rgba(100,116,139,.5)",text: "#CBD5E1" },
-      };
-
-      const TRACK_STYLES = {
-        "On Track":  { bg: "rgba(16,185,129,.18)",  border: "rgba(16,185,129,.5)",  text: "#6EE7B7" },
-        "At Risk":   { bg: "rgba(245,158,11,.18)",  border: "rgba(245,158,11,.5)",  text: "#FCD34D" },
-        "Off Track": { bg: "rgba(239,68,68,.18)",   border: "rgba(239,68,68,.5)",   text: "#FCA5A5" },
-      };
-
-      const SEED_TASKS = [
-        { title: "Prepare proposal packet for OS policy update",      category: "Governance",   priority: "Urgent",  track_status: "At Risk",  status: "todo",        due_date: null, completed: false },
-        { title: "Draft provisioning checklist for new OS",           category: "Provisioning", priority: "Normal",  track_status: "On Track", status: "todo",        due_date: null, completed: false },
-        { title: "Audit token handling path in callbacks",            category: "Security",     priority: "Urgent",  track_status: "At Risk",  status: "in_progress", due_date: null, completed: false },
-        { title: "Stabilize retry strategy for failed command packets",category: "Reliability",  priority: "Normal",  track_status: "On Track", status: "in_progress", due_date: null, completed: false },
-        { title: "Review model lane usage this week",                 category: "Cost",         priority: "Someday", track_status: "On Track", status: "done",        due_date: null, completed: true  },
-        { title: "Validate core-file coherence report",               category: "Quality",      priority: "Normal",  track_status: "On Track", status: "done",        due_date: null, completed: true  },
-      ];
-
-      // ── State ──────────────────────────────────────────────────────────────
-      let allTasks = [];
-      let filterCategory = "";
-      let filterPriority = "";
-      let donutChart = null;
-      let editingTaskId = null;
-      let dragSrcId = null;
-      let openDropdownId = null;
-      let tasksLoaded = false;
-
-      // ── DOM refs ───────────────────────────────────────────────────────────
-      const filterCatEl   = document.getElementById("tasks-filter-category");
-      const filterPriEl   = document.getElementById("tasks-filter-priority");
-      const modalEl       = document.getElementById("task-edit-modal");
-      const editTitleEl   = document.getElementById("edit-title");
-      const editCatEl     = document.getElementById("edit-category");
-      const editPriEl     = document.getElementById("edit-priority");
-      const editTrackEl   = document.getElementById("edit-track-status");
-      const editDueEl     = document.getElementById("edit-due-date");
-      const editSaveBtn   = document.getElementById("edit-save-btn");
-      const editCancelBtn = document.getElementById("edit-cancel-btn");
-      const motivBadgeEl  = document.getElementById("tasks-motivation-badge");
-
-      // ── Helpers ────────────────────────────────────────────────────────────
-      function esc(v) {
-        return String(v ?? "")
-          .replaceAll("&","&amp;").replaceAll("<","&lt;")
-          .replaceAll(">","&gt;").replaceAll('"',"&quot;");
-      }
-
-      function badgeHtml(text, style) {
-        if (!style) return `<span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold" style="background:rgba(100,116,139,.18);border-color:rgba(100,116,139,.4);color:#CBD5E1;">${esc(text)}</span>`;
-        return `<span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold" style="background:${style.bg};border-color:${style.border};color:${style.text};">${esc(text)}</span>`;
-      }
-
-      function catBadgeHtml(cat) {
-        const color = CATEGORY_COLORS[cat] || "#64748B";
-        return `<span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold" style="background:${color}22;border-color:${color}77;color:${color};">${esc(cat)}</span>`;
-      }
-
-      function formatDueDate(v) {
-        if (!v) return null;
-        const d = new Date(v);
-        if (isNaN(d)) return null;
-        return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-      }
-
-      function getStatusFromCol(col) { return col; }
-
-      function visibleTasks() {
-        return allTasks.filter(t => {
-          if (filterCategory && t.category !== filterCategory) return false;
-          if (filterPriority && t.priority !== filterPriority) return false;
-          return true;
-        });
-      }
-
-      // ── Donut chart ────────────────────────────────────────────────────────
-      function updateOverviewBar() {
-        const todo       = allTasks.filter(t => t.status === "todo").length;
-        const inProgress = allTasks.filter(t => t.status === "in_progress").length;
-        const done       = allTasks.filter(t => t.status === "done").length;
-        const total      = allTasks.length || 1;
-
-        document.getElementById("stat-todo-count").textContent  = todo;
-        document.getElementById("stat-doing-count").textContent = inProgress;
-        document.getElementById("stat-done-count").textContent  = done;
-        document.getElementById("stat-todo-pct").textContent    = Math.round(todo/total*100) + "%";
-        document.getElementById("stat-doing-pct").textContent   = Math.round(inProgress/total*100) + "%";
-        document.getElementById("stat-done-pct").textContent    = Math.round(done/total*100) + "%";
-
-        const donePct = Math.round(done / total * 100);
-        let motiv, motivColor, motivBorder;
-        if (donePct <= 30) {
-          motiv = "Just getting started — let's go!";
-          motivColor = "rgba(59,130,246,.18)"; motivBorder = "rgba(59,130,246,.5)";
-          motivBadgeEl.style.color = "#93C5FD";
-        } else if (donePct <= 60) {
-          motiv = "Good progress — keep pushing!";
-          motivColor = "rgba(245,158,11,.18)"; motivBorder = "rgba(245,158,11,.5)";
-          motivBadgeEl.style.color = "#FCD34D";
-        } else if (donePct <= 90) {
-          motiv = "Almost there — finish strong!";
-          motivColor = "rgba(124,58,237,.18)"; motivBorder = "rgba(124,58,237,.5)";
-          motivBadgeEl.style.color = "#C4B5FD";
-        } else {
-          motiv = "Outstanding — complete.";
-          motivColor = "rgba(16,185,129,.18)"; motivBorder = "rgba(16,185,129,.5)";
-          motivBadgeEl.style.color = "#6EE7B7";
-        }
-        motivBadgeEl.textContent = motiv;
-        motivBadgeEl.style.background = motivColor;
-        motivBadgeEl.style.borderColor = motivBorder;
-
-        const canvas = document.getElementById("tasks-donut-chart");
-        if (!canvas) return;
-        const data = [todo || 0.001, inProgress || 0.001, done || 0.001];
-
-        if (donutChart) {
-          donutChart.data.datasets[0].data = data;
-          donutChart.update("none");
-        } else {
-          donutChart = new Chart(canvas, {
-            type: "doughnut",
-            data: {
-              labels: ["To Do","Doing","Done"],
-              datasets: [{
-                data,
-                backgroundColor: ["#3B82F6","#F59E0B","#10B981"],
-                borderWidth: 0,
-                hoverOffset: 4,
-              }]
-            },
-            options: {
-              responsive: false,
-              cutout: "68%",
-              animation: { duration: 400 },
-              plugins: { legend: { display: false }, tooltip: { enabled: true } },
-            }
-          });
-        }
-      }
-
-      // ── Card HTML ──────────────────────────────────────────────────────────
-      function buildCardHtml(task) {
-        const priStyle   = PRIORITY_STYLES[task.priority]   || null;
-        const trackStyle = TRACK_STYLES[task.track_status]  || null;
-        const due        = formatDueDate(task.due_date);
-        const checkStyle = task.completed
-          ? "background:#10B981;border-color:#10B981;"
-          : "background:transparent;border-color:rgba(255,255,255,.28);";
-        const checkIcon  = task.completed
-          ? `<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5.2l2.2 2.2 3.8-4" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-          : "";
-
-        return `
-          <div class="kanban-card card-enter p-3" draggable="true" data-id="${esc(task.id)}">
-            <div class="flex items-start gap-2">
-              <button class="task-check-btn mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border transition" style="${checkStyle}" data-id="${esc(task.id)}">
-                ${checkIcon}
-              </button>
-              <p class="flex-1 text-sm font-bold leading-snug text-white ${task.completed ? 'line-through opacity-50' : ''}">${esc(task.title)}</p>
-              <div class="task-dot-menu ml-1 flex-shrink-0">
-                <button class="task-dot-btn rounded p-1 text-slate-400 transition hover:text-slate-100" data-id="${esc(task.id)}">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>
-                </button>
-                <div class="task-dot-dropdown hidden" data-id="${esc(task.id)}">
-                  <button class="task-edit-btn" data-id="${esc(task.id)}">✏️ Edit</button>
-                  <button class="task-delete-btn" data-id="${esc(task.id)}" style="color:#FCA5A5;">🗑 Delete</button>
-                </div>
-              </div>
-            </div>
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              ${catBadgeHtml(task.category)}
-              ${badgeHtml(task.priority, priStyle)}
-              ${task.track_status ? badgeHtml(task.track_status, trackStyle) : ""}
-            </div>
-            ${due ? `<p class="mt-2 text-[11px] text-slate-400">📅 ${esc(due)}</p>` : ""}
-          </div>`;
-      }
-
-      // ── Render board ───────────────────────────────────────────────────────
-      function renderBoard() {
-        const cols = ["todo","in_progress","done"];
-        const visible = visibleTasks();
-
-        cols.forEach(col => {
-          const listEl  = document.getElementById(`kanban-list-${col}`);
-          const countEl = document.getElementById(`kanban-count-${col}`);
-          if (!listEl) return;
-
-          const colTasks = visible.filter(t => t.status === col);
-          countEl.textContent = colTasks.length;
-          listEl.innerHTML = colTasks.length
-            ? colTasks.map(buildCardHtml).join("")
-            : `<p class="rounded-xl border border-dashed border-white/15 bg-slate-900/30 py-4 text-center text-xs text-slate-500">No tasks</p>`;
-
-          // Attach drag events
-          listEl.querySelectorAll(".kanban-card").forEach(card => {
-            card.addEventListener("dragstart", onDragStart);
-            card.addEventListener("dragend",   onDragEnd);
-          });
-
-          // Checkbox
-          listEl.querySelectorAll(".task-check-btn").forEach(btn => {
-            btn.addEventListener("click", e => { e.stopPropagation(); toggleComplete(btn.dataset.id); });
-          });
-
-          // Dot menu toggle
-          listEl.querySelectorAll(".task-dot-btn").forEach(btn => {
-            btn.addEventListener("click", e => { e.stopPropagation(); toggleDropdown(btn.dataset.id); });
-          });
-
-          // Edit / Delete
-          listEl.querySelectorAll(".task-edit-btn").forEach(btn => {
-            btn.addEventListener("click", e => { e.stopPropagation(); openEditModal(btn.dataset.id); closeDropdown(); });
-          });
-          listEl.querySelectorAll(".task-delete-btn").forEach(btn => {
-            btn.addEventListener("click", e => { e.stopPropagation(); deleteTask(btn.dataset.id); closeDropdown(); });
-          });
-        });
-
-        // Drag-over on columns
-        document.querySelectorAll(".kanban-column").forEach(col => {
-          col.addEventListener("dragover",  onDragOver);
-          col.addEventListener("dragleave", onDragLeave);
-          col.addEventListener("drop",      onDrop);
-        });
-
-        updateOverviewBar();
-      }
-
-      // ── Drag & Drop ────────────────────────────────────────────────────────
-      function onDragStart(e) {
-        dragSrcId = e.currentTarget.dataset.id;
-        e.currentTarget.classList.add("dragging");
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", dragSrcId);
-      }
-
-      function onDragEnd(e) {
-        e.currentTarget.classList.remove("dragging");
-        document.querySelectorAll(".kanban-column").forEach(c => c.classList.remove("drag-over"));
-      }
-
-      function onDragOver(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        e.currentTarget.classList.add("drag-over");
-      }
-
-      function onDragLeave(e) {
-        if (!e.currentTarget.contains(e.relatedTarget)) {
-          e.currentTarget.classList.remove("drag-over");
-        }
-      }
-
-      async function onDrop(e) {
-        e.preventDefault();
-        e.currentTarget.classList.remove("drag-over");
-        const newStatus = e.currentTarget.dataset.status;
-        if (!dragSrcId || !newStatus) return;
-
-        const task = allTasks.find(t => String(t.id) === String(dragSrcId));
-        if (!task || task.status === newStatus) return;
-
-        task.status    = newStatus;
-        task.completed = newStatus === "done";
-        renderBoard();
-
-        if (supabaseClient) {
-          const { error } = await supabaseClient
-            .from("todos")
-            .update({ status: newStatus, completed: task.completed })
-            .eq("id", task.id);
-          if (error) console.error("Supabase status update failed:", error);
-        }
-        dragSrcId = null;
-      }
-
-      // ── Toggle complete ────────────────────────────────────────────────────
-      async function toggleComplete(id) {
-        const task = allTasks.find(t => String(t.id) === String(id));
-        if (!task) return;
-
-        task.completed = !task.completed;
-        if (task.completed) task.status = "done";
-        renderBoard();
-
-        if (supabaseClient) {
-          const { error } = await supabaseClient
-            .from("todos")
-            .update({ completed: task.completed, status: task.status })
-            .eq("id", task.id);
-          if (error) console.error("Supabase toggle failed:", error);
-        }
-      }
-
-      // ── Dot menu ───────────────────────────────────────────────────────────
-      function toggleDropdown(id) {
-        if (openDropdownId === id) { closeDropdown(); return; }
-        closeDropdown();
-        openDropdownId = id;
-        const dd = document.querySelector(`.task-dot-dropdown[data-id="${id}"]`);
-        if (dd) dd.classList.remove("hidden");
-      }
-
-      function closeDropdown() {
-        if (openDropdownId) {
-          const dd = document.querySelector(`.task-dot-dropdown[data-id="${openDropdownId}"]`);
-          if (dd) dd.classList.add("hidden");
-          openDropdownId = null;
-        }
-      }
-
-      document.addEventListener("click", e => {
-        if (!e.target.closest(".task-dot-menu")) closeDropdown();
+      window.CeilMissionQueue && window.CeilMissionQueue.init({
+        workspaceId: window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default",
       });
-
-      // ── Delete ─────────────────────────────────────────────────────────────
-      async function deleteTask(id) {
-        allTasks = allTasks.filter(t => String(t.id) !== String(id));
-        renderBoard();
-
-        if (supabaseClient) {
-          const { error } = await supabaseClient.from("todos").delete().eq("id", id);
-          if (error) console.error("Supabase delete failed:", error);
-        }
-      }
-
-      // ── Edit modal ─────────────────────────────────────────────────────────
-      function openEditModal(id) {
-        const task = allTasks.find(t => String(t.id) === String(id));
-        if (!task) return;
-        editingTaskId = id;
-        editTitleEl.value = task.title || "";
-        editCatEl.value   = task.category || "Governance";
-        editPriEl.value   = task.priority || "Normal";
-        editTrackEl.value = task.track_status || "On Track";
-        editDueEl.value   = task.due_date ? task.due_date.slice(0,10) : "";
-        modalEl.classList.remove("hidden");
-        modalEl.classList.add("flex");
-      }
-
-      function closeEditModal() {
-        editingTaskId = null;
-        modalEl.classList.add("hidden");
-        modalEl.classList.remove("flex");
-      }
-
-      editCancelBtn.addEventListener("click", closeEditModal);
-      modalEl.addEventListener("click", e => { if (e.target === modalEl) closeEditModal(); });
-
-      editSaveBtn.addEventListener("click", async () => {
-        if (!editingTaskId) return;
-        const task = allTasks.find(t => String(t.id) === String(editingTaskId));
-        if (!task) return;
-
-        task.title        = editTitleEl.value.trim() || task.title;
-        task.category     = editCatEl.value;
-        task.priority     = editPriEl.value;
-        task.track_status = editTrackEl.value;
-        task.due_date     = editDueEl.value || null;
-        closeEditModal();
-        renderBoard();
-
-        if (supabaseClient) {
-          const { error } = await supabaseClient
-            .from("todos")
-            .update({
-              title:        task.title,
-              category:     task.category,
-              priority:     task.priority,
-              track_status: task.track_status,
-              due_date:     task.due_date,
-            })
-            .eq("id", task.id);
-          if (error) console.error("Supabase edit save failed:", error);
-        }
-      });
-
-      // ── Add task inline form ───────────────────────────────────────────────
-      function buildInlineForm(col) {
-        return `
-          <div class="kanban-inline-form-inner">
-            <input class="add-title-input" type="text" placeholder="Task title…" />
-            <select class="add-cat-select">
-              ${Object.keys(CATEGORY_COLORS).map(c => `<option value="${c}">${c}</option>`).join("")}
-            </select>
-            <select class="add-pri-select">
-              <option value="Normal">Normal</option>
-              <option value="Urgent">Urgent</option>
-              <option value="Someday">Someday</option>
-            </select>
-            <select class="add-track-select">
-              <option value="On Track">On Track</option>
-              <option value="At Risk">At Risk</option>
-              <option value="Off Track">Off Track</option>
-            </select>
-            <input class="add-due-input" type="date" />
-            <div class="mt-2 flex gap-2">
-              <button class="add-save-btn flex-1 rounded-lg bg-violet-600 py-1.5 text-xs font-semibold text-white hover:bg-violet-500">Save</button>
-              <button class="add-cancel-btn flex-1 rounded-lg border border-white/15 py-1.5 text-xs text-slate-300 hover:bg-white/5">Cancel</button>
-            </div>
-          </div>`;
-      }
-
-      document.querySelectorAll(".kanban-add-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const col        = btn.dataset.col;
-          const formWrap   = document.querySelector(`.kanban-inline-form[data-col="${col}"]`);
-          if (!formWrap) return;
-
-          // Toggle
-          if (!formWrap.classList.contains("hidden")) {
-            formWrap.classList.add("hidden");
-            formWrap.innerHTML = "";
-            return;
-          }
-
-          // Hide all other open forms
-          document.querySelectorAll(".kanban-inline-form").forEach(f => { f.classList.add("hidden"); f.innerHTML = ""; });
-
-          formWrap.innerHTML = buildInlineForm(col);
-          formWrap.classList.remove("hidden");
-          formWrap.querySelector(".add-title-input").focus();
-
-          formWrap.querySelector(".add-cancel-btn").addEventListener("click", () => {
-            formWrap.classList.add("hidden");
-            formWrap.innerHTML = "";
-          });
-
-          formWrap.querySelector(".add-save-btn").addEventListener("click", async () => {
-            const title       = formWrap.querySelector(".add-title-input").value.trim();
-            if (!title) { formWrap.querySelector(".add-title-input").focus(); return; }
-
-            const category    = formWrap.querySelector(".add-cat-select").value;
-            const priority    = formWrap.querySelector(".add-pri-select").value;
-            const track_status= formWrap.querySelector(".add-track-select").value;
-            const due_date    = formWrap.querySelector(".add-due-input").value || null;
-            const status      = getStatusFromCol(col);
-            const completed   = col === "done";
-
-            formWrap.classList.add("hidden");
-            formWrap.innerHTML = "";
-
-            const newTask = {
-              id: "local-" + Date.now(),
-              title, category, priority, track_status, due_date, status, completed,
-              created_at: new Date().toISOString(),
-            };
-
-            if (supabaseClient) {
-              const { data, error } = await supabaseClient
-                .from("todos")
-                .insert([{ title, category, priority, track_status, due_date, status, completed }])
-                .select()
-                .single();
-              if (!error && data) {
-                newTask.id = data.id;
-              } else if (error) {
-                console.error("Supabase insert failed:", error);
-              }
-            }
-
-            allTasks.push(newTask);
-            renderBoard();
-          });
-        });
-      });
-
-      // ── Filters ────────────────────────────────────────────────────────────
-      filterCatEl.addEventListener("change", () => { filterCategory = filterCatEl.value; renderBoard(); });
-      filterPriEl.addEventListener("change", () => { filterPriority = filterPriEl.value; renderBoard(); });
-
-      // ── Load data ──────────────────────────────────────────────────────────
-      async function loadTasks() {
-        if (tasksLoaded) return;
-        tasksLoaded = true;
-
-        if (supabaseClient) {
-          const { data, error } = await supabaseClient
-            .from("todos")
-            .select("id, title, category, priority, due_date, completed, status, track_status, created_at")
-            .order("created_at", { ascending: false });
-
-          if (!error && data && data.length > 0) {
-            allTasks = data;
-            renderBoard();
-            return;
-          }
-
-          if (!error && data && data.length === 0) {
-            // Seed sample tasks
-            await seedTasks();
-            return;
-          }
-
-          if (error) {
-            console.error("Failed to load todos:", error);
-          }
-        }
-
-        // Fallback: seed locally
-        allTasks = SEED_TASKS.map((t, i) => ({ ...t, id: "seed-" + i, created_at: new Date().toISOString() }));
-        renderBoard();
-      }
-
-      async function seedTasks() {
-        if (!supabaseClient) {
-          allTasks = SEED_TASKS.map((t, i) => ({ ...t, id: "seed-" + i, created_at: new Date().toISOString() }));
-          renderBoard();
-          return;
-        }
-
-        const { data, error } = await supabaseClient
-          .from("todos")
-          .insert(SEED_TASKS)
-          .select();
-
-        if (!error && data) {
-          allTasks = data;
-        } else {
-          console.error("Seed insert failed:", error);
-          allTasks = SEED_TASKS.map((t, i) => ({ ...t, id: "seed-" + i, created_at: new Date().toISOString() }));
-        }
-
-        renderBoard();
-      }
-
-      // ── Tab hook ───────────────────────────────────────────────────────────
-      // Extend activateTab to trigger task load when tasks tab clicked
-      const _origActivateTab = window._ceilActivateTab || null;
-
-      // Monkey-patch tab-btn listeners
-      document.querySelectorAll(".tab-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          if (btn.dataset.tab === "tasks") {
-            // small delay so panel becomes active first
-            setTimeout(loadTasks, 80);
-          }
-        });
-      });
-
-      // If tasks tab is active on page load, load immediately
-      if (document.getElementById("panel-tasks")?.classList.contains("active")) {
-        loadTasks();
-      }
-
-      // Realtime subscription for todos table
-      if (supabaseClient) {
-        supabaseClient
-          .channel("todos-live")
-          .on("postgres_changes", { event: "*", schema: "public", table: "todos" }, payload => {
-            const ev = payload.eventType;
-            if (ev === "INSERT") {
-              if (!allTasks.find(t => String(t.id) === String(payload.new.id))) {
-                allTasks.push(payload.new);
-                renderBoard();
-              }
-            } else if (ev === "UPDATE") {
-              const idx = allTasks.findIndex(t => String(t.id) === String(payload.new.id));
-              if (idx !== -1) { allTasks[idx] = payload.new; renderBoard(); }
-            } else if (ev === "DELETE") {
-              allTasks = allTasks.filter(t => String(t.id) !== String(payload.old.id));
-              renderBoard();
-            }
-          })
-          .subscribe();
-      }
-
-    })();
     </script>
   </body>
 </html>

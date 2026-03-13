@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Static dashboard server + local proxy for OpenClaw /tools/invoke."""
+"""Static dashboard server + local proxies for OpenClaw and Mission Control."""
 
 from __future__ import annotations
 
 import argparse
+import base64
 import glob
 import json
 import os
@@ -51,6 +52,8 @@ DEFAULT_PORT = 45680
 DEFAULT_DIRECTORY = "/root/.openclaw/workspace/ceil-workspace-dashboard"
 DEFAULT_CONFIG_PATH = "/root/.openclaw/openclaw.json"
 DEFAULT_TOOLS_URL = "http://127.0.0.1:18789/tools/invoke"
+DEFAULT_MISSION_CONTROL_URL = "http://127.0.0.1:4000"
+DEFAULT_MISSION_CONTROL_ENV_PATH = "/root/.openclaw/workspace/autensa/.env.local"
 DEFAULT_COUNCIL_ARTIFACT_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.council-artifacts"
 DEFAULT_ALLOWED_GATEWAY_PORTS = {18789, 19001, 19011, 19021, 19031, 19041, 19051, 19061, 19071, 19081, 19091, 19101, 19111}
 DEFAULT_PORT_CONFIG_MAP = {
@@ -115,6 +118,52 @@ def load_gateway_token(config_path: str) -> str:
     if not isinstance(token, str) or not token.strip():
         raise RuntimeError("gateway.auth.token missing in config")
     return token.strip()
+
+
+def load_dotenv_value(env_path: str, key: str) -> str | None:
+    path = Path(env_path)
+    if not path.exists():
+        return None
+
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            env_key, env_value = line.split("=", 1)
+            if env_key.strip() != key:
+                continue
+            value = env_value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            return value
+    except OSError:
+        return None
+
+    return None
+
+
+def load_mission_control_auth(
+    token_env: str | None,
+    env_path: str | None,
+    basic_user_env: str | None,
+    basic_pass_env: str | None,
+) -> dict[str, str]:
+    token = (token_env or "").strip()
+    basic_user = (basic_user_env or "").strip()
+    basic_pass = (basic_pass_env or "").strip()
+
+    if env_path:
+        token = token or (load_dotenv_value(env_path, "MC_API_TOKEN") or "").strip()
+        basic_user = basic_user or (load_dotenv_value(env_path, "MC_BASIC_AUTH_USER") or "").strip()
+        basic_pass = basic_pass or (load_dotenv_value(env_path, "MC_BASIC_AUTH_PASS") or "").strip()
+
+    auth: dict[str, str] = {}
+    if token:
+        auth["bearer"] = token
+    if basic_user and basic_pass:
+        auth["basic"] = base64.b64encode(f"{basic_user}:{basic_pass}".encode("utf-8")).decode("ascii")
+    return auth
 
 
 def find_config_for_port(default_config_path: str, port: int) -> str:
@@ -207,6 +256,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @property
+    def mission_control_url(self) -> str:
+        return self.server.mission_control_url  # type: ignore[attr-defined]
+
+    @property
+    def mission_control_env_path(self) -> str | None:
+        return getattr(self.server, "mission_control_env_path", None)  # type: ignore[attr-defined]
+
+    @property
+    def mission_control_auth(self) -> dict[str, str]:
+        return self.server.mission_control_auth  # type: ignore[attr-defined]
+
     def _add_cors_headers_if_allowed(self) -> None:
         allowed, origin = self._resolve_origin()
         if not allowed or not origin:
@@ -218,6 +279,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/mission-control/"):
+            allowed, _origin = self._resolve_origin()
+            if not allowed:
+                self._write_json(403, {"ok": False, "error": {"type": "forbidden", "message": "Origin not allowed"}}, add_cors=False)
+                return
+
+            self.send_response(204)
+            self._add_cors_headers_if_allowed()
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         if parsed.path not in {"/api/tools/invoke", "/api/council/run/start", "/api/council/run/stop", "/api/council/run/stream"}:
             self.send_error(404)
             return
@@ -231,6 +306,95 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self._add_cors_headers_if_allowed()
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def _mission_control_target(self, parsed) -> str:
+        prefix = "/api/mission-control"
+        suffix = parsed.path[len(prefix):] if parsed.path.startswith(prefix) else parsed.path
+        query = f"?{parsed.query}" if parsed.query else ""
+        return f"{self.mission_control_url.rstrip('/')}{suffix}{query}"
+
+    def _build_mission_control_headers(self, *, content_type: str | None = None, accept: str | None = None) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if content_type:
+            headers["Content-Type"] = content_type
+        if accept:
+            headers["Accept"] = accept
+        bearer = self.mission_control_auth.get("bearer")
+        basic = self.mission_control_auth.get("basic")
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+        elif basic:
+            headers["Authorization"] = f"Basic {basic}"
+        return headers
+
+    def _proxy_mission_control_request(self, method: str, parsed, *, body: bytes | None = None, stream: bool = False) -> None:
+        has_origin = bool(self.headers.get("Origin"))
+        allowed, _origin = self._resolve_origin()
+        if has_origin and not allowed:
+            self._write_json(403, {"ok": False, "error": {"type": "forbidden", "message": "Origin not allowed"}}, add_cors=False)
+            return
+
+        req = urllib.request.Request(
+            self._mission_control_target(parsed),
+            data=body,
+            method=method,
+            headers=self._build_mission_control_headers(
+                content_type=self.headers.get("Content-Type") if body is not None else None,
+                accept=self.headers.get("Accept"),
+            ),
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                status = resp.status
+                content_type = resp.headers.get("Content-Type", "application/json")
+                cache_control = resp.headers.get("Cache-Control", "no-store")
+                if stream:
+                    self.send_response(status)
+                    if has_origin:
+                        self._add_cors_headers_if_allowed()
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Cache-Control", cache_control)
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    while True:
+                        chunk = resp.read(4096)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                    return
+
+                resp_body = resp.read()
+        except urllib.error.HTTPError as err:
+            if stream:
+                message = err.read().decode("utf-8", "replace")
+                self._write_json(
+                    err.code,
+                    {"ok": False, "error": {"type": "bad_gateway", "message": f"Mission Control stream failed: {message}"}},
+                    add_cors=has_origin,
+                )
+                return
+            resp_body = err.read()
+            status = err.code
+            content_type = err.headers.get("Content-Type", "application/json") if err.headers else "application/json"
+            cache_control = err.headers.get("Cache-Control", "no-store") if err.headers else "no-store"
+        except Exception as exc:  # pylint: disable=broad-except
+            self._write_json(
+                502,
+                {"ok": False, "error": {"type": "bad_gateway", "message": f"Mission Control forward failed: {exc}"}},
+                add_cors=has_origin,
+            )
+            return
+
+        self.send_response(status)
+        if has_origin:
+            self._add_cors_headers_if_allowed()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", cache_control)
+        self.send_header("Content-Length", str(len(resp_body)))
+        self.end_headers()
+        self.wfile.write(resp_body)
 
     def _handle_council_stream(self, parsed) -> None:
         run_id = parse_qs(parsed.query or "").get("run_id", [""])[0].strip()
@@ -289,6 +453,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/mission-control/"):
+            self._proxy_mission_control_request("GET", parsed, stream=parsed.path.endswith("/events/stream"))
+            return
         if parsed.path == "/api/council/run/stream":
             self._handle_council_stream(parsed)
             return
@@ -308,10 +475,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "ok": config_ok,
             "service": "ceil-workspace-dashboard",
             "tools_url": self.tools_url,
+            "mission_control_url": self.mission_control_url,
             "config_path": self.config_path,
             "allowed_gateway_ports": sorted(self.allowed_gateway_ports),
             "cors_mode": "explicit" if self.allowed_origins else "same-origin-fallback",
             "has_explicit_allowed_origins": bool(self.allowed_origins),
+            "mission_control_auth": "configured" if self.mission_control_auth else "not_configured",
         }
         if config_ok:
             payload["gateway_auth"] = "configured"
@@ -406,6 +575,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/mission-control/"):
+            raw_len = self.headers.get("Content-Length")
+            try:
+                body_len = int(raw_len or "0")
+            except ValueError:
+                self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid Content-Length"}})
+                return
+            body = self.rfile.read(body_len) if body_len > 0 else None
+            self._proxy_mission_control_request("POST", parsed, body=body)
+            return
         if parsed.path == "/api/council/run/start":
             self._handle_council_start()
             return
@@ -479,6 +658,29 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(resp_body)
 
+    def do_PATCH(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/api/mission-control/"):
+            self.send_error(404)
+            return
+
+        raw_len = self.headers.get("Content-Length")
+        try:
+            body_len = int(raw_len or "0")
+        except ValueError:
+            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": "Invalid Content-Length"}})
+            return
+
+        body = self.rfile.read(body_len) if body_len > 0 else None
+        self._proxy_mission_control_request("PATCH", parsed, body=body)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/api/mission-control/"):
+            self.send_error(404)
+            return
+        self._proxy_mission_control_request("DELETE", parsed)
+
 
 def build_handler(directory: str):
     class _BoundHandler(DashboardHandler):
@@ -489,12 +691,18 @@ def build_handler(directory: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Serve dashboard + proxy /api/tools/invoke")
+    parser = argparse.ArgumentParser(description="Serve dashboard + proxy OpenClaw and Mission Control APIs")
     parser.add_argument("--bind", default=os.getenv("DASHBOARD_BIND", DEFAULT_BIND))
     parser.add_argument("--port", type=int, default=int(os.getenv("DASHBOARD_PORT", str(DEFAULT_PORT))))
     parser.add_argument("--directory", default=os.getenv("DASHBOARD_DIRECTORY", DEFAULT_DIRECTORY))
     parser.add_argument("--config", default=os.getenv("OPENCLAW_CONFIG_PATH", DEFAULT_CONFIG_PATH))
     parser.add_argument("--tools-url", default=os.getenv("OPENCLAW_TOOLS_URL", DEFAULT_TOOLS_URL))
+    parser.add_argument("--mission-control-url", default=os.getenv("MISSION_CONTROL_URL", DEFAULT_MISSION_CONTROL_URL))
+    parser.add_argument(
+        "--mission-control-env",
+        default=os.getenv("MISSION_CONTROL_ENV_PATH", DEFAULT_MISSION_CONTROL_ENV_PATH),
+        help="Path to Mission Control .env file for loading API auth credentials.",
+    )
     parser.add_argument(
         "--allowed-origins",
         default=os.getenv("DASHBOARD_ALLOWED_ORIGINS", ""),
@@ -523,6 +731,14 @@ def main() -> int:
     server.allowed_gateway_ports = allowed_ports  # type: ignore[attr-defined]
     server.config_path = args.config  # type: ignore[attr-defined]
     server.tools_url = args.tools_url  # type: ignore[attr-defined]
+    server.mission_control_url = args.mission_control_url  # type: ignore[attr-defined]
+    server.mission_control_env_path = args.mission_control_env  # type: ignore[attr-defined]
+    server.mission_control_auth = load_mission_control_auth(  # type: ignore[attr-defined]
+        os.getenv("MC_API_TOKEN"),
+        args.mission_control_env,
+        os.getenv("MC_BASIC_AUTH_USER"),
+        os.getenv("MC_BASIC_AUTH_PASS"),
+    )
     server.council_event_bus = CouncilEventBus()  # type: ignore[attr-defined]
     server.council_orchestrator = CouncilOrchestrator(  # type: ignore[attr-defined]
         event_bus=server.council_event_bus,

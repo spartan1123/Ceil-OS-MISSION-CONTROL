@@ -46,6 +46,71 @@ class RecordingHandler(BaseHTTPRequestHandler):
         return
 
 
+class RecordingMissionControlHandler(BaseHTTPRequestHandler):
+    calls = []
+    sse_body = b"data: {\"type\":\"task_updated\",\"payload\":{\"id\":\"task-1\"}}\n\n"
+
+    def _record(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length) if length else b""
+        RecordingMissionControlHandler.calls.append(
+            {
+                "method": self.command,
+                "path": self.path,
+                "headers": dict(self.headers.items()),
+                "body": body.decode("utf-8"),
+            }
+        )
+        return body
+
+    def do_GET(self):  # noqa: N802
+        self._record()
+        if self.path.startswith("/api/events/stream"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(self.sse_body)
+            return
+
+        response = json.dumps([{"id": "task-1", "title": "Queue item"}]).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def do_POST(self):  # noqa: N802
+        body = self._record()
+        response = json.dumps({"ok": True, "echo": json.loads(body.decode("utf-8") or "{}")}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def do_PATCH(self):  # noqa: N802
+        body = self._record()
+        response = json.dumps({"ok": True, "patched": json.loads(body.decode("utf-8") or "{}")}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def do_DELETE(self):  # noqa: N802
+        self._record()
+        response = json.dumps({"success": True}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def log_message(self, format, *args):  # noqa: A003
+        return
+
+
 class DummyCouncilOrchestrator:
     def __init__(self):
         self.started = []
@@ -82,10 +147,21 @@ class DashboardServerTests(unittest.TestCase):
         self.gateway_thread.start()
         self.addCleanup(self._cleanup_gateway)
 
+        RecordingMissionControlHandler.calls = []
+        self.mission_control = ThreadingHTTPServer(("127.0.0.1", 0), RecordingMissionControlHandler)
+        self.mission_control_thread = threading.Thread(target=self.mission_control.serve_forever, daemon=True)
+        self.mission_control_thread.start()
+        self.addCleanup(self._cleanup_mission_control)
+
     def _cleanup_gateway(self):
         self.gateway.shutdown()
         self.gateway.server_close()
         self.gateway_thread.join(timeout=2)
+
+    def _cleanup_mission_control(self):
+        self.mission_control.shutdown()
+        self.mission_control.server_close()
+        self.mission_control_thread.join(timeout=2)
 
     def make_dashboard(self, *, allowed_origins=None, allowed_ports=None, config_path=None, council_orchestrator=None):
         handler_cls = dashboard_server.build_handler(str(self.dashboard_dir))
@@ -94,6 +170,9 @@ class DashboardServerTests(unittest.TestCase):
         server.allowed_gateway_ports = set(allowed_ports or {18789, 19001})
         server.config_path = str(config_path or self.default_config)
         server.tools_url = f"http://127.0.0.1:{self.gateway.server_address[1]}/tools/invoke"
+        server.mission_control_url = f"http://127.0.0.1:{self.mission_control.server_address[1]}"
+        server.mission_control_env_path = None
+        server.mission_control_auth = {}
         server.council_event_bus = dashboard_server.CouncilEventBus()
         server.council_orchestrator = council_orchestrator or DummyCouncilOrchestrator()
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -114,6 +193,14 @@ class DashboardServerTests(unittest.TestCase):
         for key, value in (headers or {}).items():
             req.add_header(key, value)
         return urlopen(req, timeout=5)
+
+    def test_health_endpoint_includes_mission_control_state(self):
+        server = self.make_dashboard(allowed_ports={18789, 19001})
+        with self.request(server, path="/api/health", method="GET") as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(body["mission_control_url"], f"http://127.0.0.1:{self.mission_control.server_address[1]}")
+        self.assertEqual(body["mission_control_auth"], "not_configured")
 
     def test_parse_allowed_gateway_ports_defaults_to_known_ports(self):
         self.assertEqual(
@@ -223,6 +310,54 @@ class DashboardServerTests(unittest.TestCase):
         body = json.loads(ctx.exception.read().decode("utf-8"))
         self.assertEqual(body["error"]["message"], "Invalid or disallowed gateway port")
         self.assertEqual(len(RecordingHandler.calls), 0)
+
+    def test_mission_control_get_proxy_forwards_requests(self):
+        server = self.make_dashboard()
+        with self.request(
+            server,
+            path="/api/mission-control/api/tasks?workspace_id=default",
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="GET",
+        ) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body[0]["id"], "task-1")
+        forwarded = RecordingMissionControlHandler.calls[-1]
+        self.assertEqual(forwarded["method"], "GET")
+        self.assertEqual(forwarded["path"], "/api/tasks?workspace_id=default")
+
+    def test_mission_control_patch_proxy_forwards_json_and_auth(self):
+        server = self.make_dashboard()
+        server.mission_control_auth = {"bearer": "mc-token"}
+
+        with self.request(
+            server,
+            path="/api/mission-control/api/tasks/task-1",
+            payload={"status": "review"},
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="PATCH",
+        ) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertTrue(body["ok"])
+        forwarded = RecordingMissionControlHandler.calls[-1]
+        self.assertEqual(forwarded["method"], "PATCH")
+        self.assertEqual(forwarded["headers"]["Authorization"], "Bearer mc-token")
+        self.assertEqual(json.loads(forwarded["body"]), {"status": "review"})
+
+    def test_mission_control_sse_proxy_streams_response(self):
+        server = self.make_dashboard()
+        with self.request(
+            server,
+            path="/api/mission-control/api/events/stream?workspace_id=default",
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="GET",
+        ) as resp:
+            body = resp.read().decode("utf-8")
+
+        self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
+        self.assertIn("task_updated", body)
 
     def test_council_start_requires_topic(self):
         server = self.make_dashboard()
