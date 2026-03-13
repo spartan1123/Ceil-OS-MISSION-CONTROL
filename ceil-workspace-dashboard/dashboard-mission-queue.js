@@ -30,6 +30,12 @@
     provision_workspace: { label: "Provisioning", color: "#67E8F9" },
   };
 
+  const AGENT_LANES = {
+    all: "all",
+    working: "working",
+    standby: "standby",
+  };
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -70,6 +76,32 @@
       if (filters.type && String(task.task_type || "general") !== filters.type) return false;
       return true;
     });
+  }
+
+  function inferAgentActivityState(agent, tasks) {
+    const status = String(agent && agent.status ? agent.status : "").toLowerCase();
+    const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent && agent.id ? agent.id : "")).length;
+    if (["working", "active", "busy", "running"].includes(status) || assignedCount > 0) {
+      return AGENT_LANES.working;
+    }
+    return AGENT_LANES.standby;
+  }
+
+  function filterAgentsByLane(agents, lane, tasks) {
+    if (lane === AGENT_LANES.all) return agents.slice();
+    return agents.filter((agent) => inferAgentActivityState(agent, tasks) === lane);
+  }
+
+  function feedLaneForEvent(event) {
+    if (!event || typeof event !== "object") return "all";
+    if (event.task_id || /^task_/i.test(String(event.type || ""))) return "tasks";
+    if (event.agent_id || /^agent_/i.test(String(event.type || ""))) return "agents";
+    return "all";
+  }
+
+  function filterFeedEvents(events, filter) {
+    if (filter === "all") return events.slice();
+    return events.filter((event) => feedLaneForEvent(event) === filter);
   }
 
   function buildPayloadFromForm(formState) {
@@ -113,7 +145,8 @@
     if (typeof window === "undefined" || typeof document === "undefined") return;
     const panel = document.getElementById("panel-tasks");
     const boardEl = document.getElementById("mission-queue-board");
-    if (!panel || !boardEl) return;
+    const agentsRailEl = document.getElementById("mission-queue-agents");
+    if (!panel || !boardEl || !agentsRailEl) return;
 
     const state = {
       workspaceId: (options && options.workspaceId) || "default",
@@ -125,6 +158,10 @@
         status: "",
         type: "",
       },
+      agentLane: AGENT_LANES.all,
+      sideView: "agents",
+      feedFilter: "all",
+      feedEvents: [],
       dragTaskId: null,
       editingTaskId: null,
       chart: null,
@@ -136,6 +173,7 @@
     const refs = {
       panel,
       boardEl,
+      agentsRailEl: document.getElementById("mission-queue-agents"),
       bannerEl: document.getElementById("mission-queue-banner"),
       refreshBtn: document.getElementById("mission-queue-refresh-btn"),
       newBtn: document.getElementById("mission-queue-new-btn"),
@@ -248,12 +286,128 @@
       });
     }
 
+    function formatRelativeTime(value) {
+      if (!value) return "Unknown";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "Unknown";
+      const diffMs = Date.now() - date.getTime();
+      const minute = 60 * 1000;
+      const hour = 60 * minute;
+      const day = 24 * hour;
+      if (diffMs < minute) return "just now";
+      if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))} min ago`;
+      if (diffMs < day) return `${Math.max(1, Math.floor(diffMs / hour))} hr ago`;
+      return `${Math.max(1, Math.floor(diffMs / day))} day ago`;
+    }
+
+    function renderAgentsRail(tasks) {
+      const laneCounts = {
+        [AGENT_LANES.all]: state.agents.length,
+        [AGENT_LANES.working]: filterAgentsByLane(state.agents, AGENT_LANES.working, tasks).length,
+        [AGENT_LANES.standby]: filterAgentsByLane(state.agents, AGENT_LANES.standby, tasks).length,
+      };
+
+      const agents = filterAgentsByLane(state.agents, state.agentLane, tasks)
+        .sort((a, b) => {
+          const aAssigned = tasks.filter((task) => String(task.assigned_agent_id || "") === String(a.id)).length;
+          const bAssigned = tasks.filter((task) => String(task.assigned_agent_id || "") === String(b.id)).length;
+          if (bAssigned !== aAssigned) return bAssigned - aAssigned;
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        });
+
+      const listHtml = agents.length
+        ? agents.map((agent) => {
+            const lane = inferAgentActivityState(agent, tasks);
+            const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent.id)).length;
+            const statusLabel = lane === AGENT_LANES.working ? "WORKING" : "STANDBY";
+            const statusTone = lane === AGENT_LANES.working
+              ? "border-cyan-300/40 bg-cyan-500/15 text-cyan-200"
+              : "border-slate-400/30 bg-slate-500/10 text-slate-300";
+            const role = String(agent.role || agent.specialty || agent.description || "Mission specialist").slice(0, 44);
+            const healthText = agent.openclaw_enabled ? "OpenClaw Connected" : "Gateway Pending";
+            return `
+              <article class="mission-agent-card rounded-xl border border-white/10 bg-[#11172a]/80 p-2.5">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-semibold text-slate-100">${escapeHtml(agent.name || "Unknown Agent")}</p>
+                    <p class="truncate text-xs text-slate-400">${escapeHtml(role)}</p>
+                  </div>
+                  <span class="rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${statusTone}">${statusLabel}</span>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-300">
+                  <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full ${lane === AGENT_LANES.working ? "bg-emerald-400" : "bg-slate-500"}"></span>${lane === AGENT_LANES.working ? "Active" : "Idle"}</span>
+                  <span>${assignedCount} task${assignedCount === 1 ? "" : "s"}</span>
+                </div>
+                <div class="mt-2 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-center text-xs font-semibold text-emerald-200">${escapeHtml(healthText)}</div>
+              </article>
+            `;
+          }).join("")
+        : '<div class="rounded-xl border border-dashed border-white/12 bg-slate-950/30 px-3 py-6 text-center text-xs text-slate-500">No agents in this lane</div>';
+
+      const feedCounts = {
+        all: state.feedEvents.length,
+        tasks: filterFeedEvents(state.feedEvents, "tasks").length,
+        agents: filterFeedEvents(state.feedEvents, "agents").length,
+      };
+      const feedEvents = filterFeedEvents(state.feedEvents, state.feedFilter).slice(0, 80);
+      const feedHtml = feedEvents.length
+        ? feedEvents.map((event) => {
+            const icon = feedLaneForEvent(event) === "agents" ? "🤖" : feedLaneForEvent(event) === "tasks" ? "📌" : "🔔";
+            return `
+              <article class="rounded-xl border border-white/10 bg-[#11172a]/80 px-2.5 py-2">
+                <p class="text-sm leading-snug text-slate-100">${icon} ${escapeHtml(event.message || event.type || "Mission event")}</p>
+                <p class="mt-1 text-xs text-slate-400">◷ ${escapeHtml(formatRelativeTime(event.created_at))}</p>
+              </article>
+            `;
+          }).join("")
+        : '<div class="rounded-xl border border-dashed border-white/12 bg-slate-950/30 px-3 py-6 text-center text-xs text-slate-500">No live feed events</div>';
+
+      const agentsViewHtml = `
+        <div class="mb-3 grid grid-cols-3 gap-1.5 rounded-xl border border-white/10 bg-slate-900/45 p-1">
+          <button class="mission-agent-filter-btn ${state.agentLane === AGENT_LANES.all ? "active" : ""}" data-lane="all">ALL <span>${laneCounts[AGENT_LANES.all]}</span></button>
+          <button class="mission-agent-filter-btn ${state.agentLane === AGENT_LANES.working ? "active" : ""}" data-lane="working">WORKING <span>${laneCounts[AGENT_LANES.working]}</span></button>
+          <button class="mission-agent-filter-btn ${state.agentLane === AGENT_LANES.standby ? "active" : ""}" data-lane="standby">STANDBY <span>${laneCounts[AGENT_LANES.standby]}</span></button>
+        </div>
+        <div class="mission-agents-list flex-1 space-y-2 overflow-y-auto pr-1">${listHtml}</div>
+        <div class="mt-3 grid grid-cols-1 gap-2">
+          <button class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-300">+ Add Agent</button>
+          <button class="rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200">Import from Gateway</button>
+        </div>
+      `;
+
+      const feedViewHtml = `
+        <div class="mb-3 grid grid-cols-3 gap-1.5 rounded-xl border border-white/10 bg-slate-900/45 p-1">
+          <button class="mission-feed-filter-btn ${state.feedFilter === "all" ? "active" : ""}" data-feed="all">ALL <span>${feedCounts.all}</span></button>
+          <button class="mission-feed-filter-btn ${state.feedFilter === "tasks" ? "active" : ""}" data-feed="tasks">TASKS <span>${feedCounts.tasks}</span></button>
+          <button class="mission-feed-filter-btn ${state.feedFilter === "agents" ? "active" : ""}" data-feed="agents">AGENTS <span>${feedCounts.agents}</span></button>
+        </div>
+        <div class="mission-agents-list flex-1 space-y-2 overflow-y-auto pr-1">${feedHtml}</div>
+      `;
+
+      return `
+        <aside class="mission-agents-rail flex min-h-[560px] flex-col rounded-2xl border border-white/12 bg-[#0f172acc]/90 p-3">
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[0.15em] text-slate-300">${state.sideView === "agents" ? "Agents" : "Live Feed"}</p>
+              <p class="text-[11px] text-slate-400">${state.sideView === "agents" ? `${laneCounts[AGENT_LANES.all]} total` : `${feedCounts.all} events`}</p>
+            </div>
+          </div>
+          <div class="mb-3 grid grid-cols-2 gap-1.5 rounded-xl border border-white/10 bg-slate-900/45 p-1">
+            <button class="mission-side-tab-btn ${state.sideView === "agents" ? "active" : ""}" data-side="agents">AGENTS</button>
+            <button class="mission-side-tab-btn ${state.sideView === "feed" ? "active" : ""}" data-side="feed">LIVE FEED</button>
+          </div>
+          ${state.sideView === "agents" ? agentsViewHtml : feedViewHtml}
+        </aside>
+      `;
+    }
+
     function renderBoard() {
       const visibleTasks = filterTasks(state.tasks, state.filters);
+      refs.boardEl.style.gridTemplateColumns = `${QUEUE_COLUMNS.map(() => "minmax(250px, 1fr)").join(" ")}`;
       refs.boardEl.innerHTML = QUEUE_COLUMNS.map((column) => {
         const tasks = visibleTasks.filter((task) => task.status === column.id);
         return `
-          <section class="kanban-column flex min-h-[420px] flex-col rounded-2xl border p-3" data-status="${column.id}" style="background:${column.tone};border-color:${column.border};">
+          <section class="kanban-column flex min-h-[560px] flex-col rounded-2xl border p-3" data-status="${column.id}" style="background:${column.tone};border-color:${column.border};">
             <div class="mb-3 flex items-center justify-between gap-2">
               <div>
                 <p class="text-sm font-bold text-white">${column.label}</p>
@@ -267,6 +421,7 @@
           </section>
         `;
       }).join("");
+      refs.agentsRailEl.innerHTML = renderAgentsRail(visibleTasks);
 
       refs.boardEl.querySelectorAll("[data-task-id]").forEach((card) => {
         card.addEventListener("dragstart", onDragStart);
@@ -282,6 +437,24 @@
       });
       refs.boardEl.querySelectorAll("[data-action='delete']").forEach((button) => {
         button.addEventListener("click", () => deleteTask(button.getAttribute("data-task-id")));
+      });
+      refs.agentsRailEl.querySelectorAll(".mission-side-tab-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.sideView = String(button.getAttribute("data-side") || "agents");
+          renderBoard();
+        });
+      });
+      refs.agentsRailEl.querySelectorAll(".mission-agent-filter-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.agentLane = String(button.getAttribute("data-lane") || AGENT_LANES.all);
+          renderBoard();
+        });
+      });
+      refs.agentsRailEl.querySelectorAll(".mission-feed-filter-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.feedFilter = String(button.getAttribute("data-feed") || "all");
+          renderBoard();
+        });
       });
 
       renderMetrics(visibleTasks);
@@ -452,12 +625,14 @@
       if (state.loading) return;
       state.loading = true;
       try {
-        const [tasks, agents] = await Promise.all([
+        const [tasks, agents, events] = await Promise.all([
           requestJson(`/api/mission-control/api/tasks?workspace_id=${encodeURIComponent(state.workspaceId)}`),
           requestJson(`/api/mission-control/api/agents?workspace_id=${encodeURIComponent(state.workspaceId)}`),
+          requestJson(`/api/mission-control/api/events?workspace_id=${encodeURIComponent(state.workspaceId)}`).catch(() => []),
         ]);
         state.tasks = Array.isArray(tasks) ? tasks : [];
         state.agents = Array.isArray(agents) ? agents : [];
+        state.feedEvents = Array.isArray(events) ? events : [];
         hydrateFilters();
         renderBoard();
         setBanner("", "");
@@ -478,7 +653,7 @@
         if (!event.data) return;
         try {
           const payload = JSON.parse(event.data);
-          if (payload && /^task_/.test(String(payload.type || ""))) {
+          if (payload && /^(task_|agent_)/.test(String(payload.type || ""))) {
             debouncedReload();
           }
         } catch (_error) {
@@ -536,6 +711,9 @@
     PRIORITY_THEME,
     summarizeBoard,
     filterTasks,
+    inferAgentActivityState,
+    filterAgentsByLane,
+    filterFeedEvents,
     buildPayloadFromForm,
     init,
   };

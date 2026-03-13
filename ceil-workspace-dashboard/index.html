@@ -71,6 +71,7 @@
       html,
       body {
         height: 100%;
+        overflow-x: hidden;
       }
 
       body {
@@ -250,8 +251,7 @@
       }
 
       .tab-panel {
-        position: absolute;
-        inset: 0;
+        display: none;
         opacity: 0;
         transform: translateY(8px);
         pointer-events: none;
@@ -259,7 +259,7 @@
       }
 
       .tab-panel.active {
-        position: relative;
+        display: block;
         opacity: 1;
         transform: translateY(0);
         pointer-events: auto;
@@ -352,6 +352,43 @@
         background: rgba(124, 58, 237, 0.1) !important;
         box-shadow: inset 0 0 0 2px rgba(124, 58, 237, 0.45);
       }
+
+      #mission-queue-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 356px;
+        gap: 14px;
+        align-items: stretch;
+      }
+
+      #mission-queue-scroll-shell {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-gutter: stable;
+      }
+
+      #mission-queue-board {
+        width: max-content;
+        min-width: 2160px;
+      }
+
+      #mission-queue-side {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        gap: 12px;
+        align-items: stretch;
+      }
+
+      @media (max-width: 1260px) {
+        #mission-queue-layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        #mission-queue-side {
+          grid-template-columns: 22px minmax(0, 1fr);
+        }
+      }
       .kanban-card {
         background: linear-gradient(155deg, rgba(15,23,42,.92), rgba(15,23,42,.72));
         border: 1px solid rgba(255,255,255,.1);
@@ -422,6 +459,57 @@
       .kanban-inline-form-inner input:focus,
       .kanban-inline-form-inner select:focus {
         border-color: rgba(124,58,237,.6);
+      }
+
+      .mission-queue-separator {
+        min-height: 560px;
+        border-left: 1px solid rgba(255,255,255,.08);
+        border-right: 1px solid rgba(6,182,212,.16);
+        border-radius: 12px;
+        background: linear-gradient(to bottom, rgba(15,23,42,.18), rgba(15,23,42,.05));
+      }
+
+      .mission-agents-rail {
+        min-height: 560px;
+        height: 560px;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 30px rgba(2,6,23,.35);
+      }
+
+      .mission-side-tab-btn,
+      .mission-agent-filter-btn,
+      .mission-feed-filter-btn {
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: rgba(148,163,184,.9);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .04em;
+        padding: 6px 4px;
+        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+
+      .mission-agent-filter-btn span,
+      .mission-feed-filter-btn span {
+        color: rgba(203,213,225,.8);
+      }
+
+      .mission-side-tab-btn.active,
+      .mission-agent-filter-btn.active,
+      .mission-feed-filter-btn.active {
+        background: linear-gradient(145deg, rgba(96,165,250,.28), rgba(37,99,235,.22));
+        border-color: rgba(125,211,252,.45);
+        color: #e0f2fe;
+      }
+
+      .mission-agents-list {
+        min-height: 0;
+        max-height: 100%;
+        overflow-y: scroll;
       }
 
       /* ── Org Chart ── */
@@ -987,9 +1075,17 @@
         white-space: pre-wrap;
       }
 
-      /* Shift main content to not be hidden behind sidebar */
+      /* Layout: dock content to floating sidebar with full-width feel */
       body > div {
-        padding-left: 80px !important;
+        width: auto !important;
+        max-width: none !important;
+        margin-left: 124px !important;
+        margin-right: 24px !important;
+        padding-left: 0 !important;
+      }
+
+      main {
+        min-height: 0 !important;
       }
 
       @media (max-width: 640px) {
@@ -1006,7 +1102,9 @@
         .sidebar-btn::after { display: none; }
         .business-os-flyout { display: none; }
         body > div {
-          padding-left: 60px !important;
+          width: auto !important;
+          margin-left: 64px !important;
+          margin-right: 12px !important;
         }
       }
     </style>
@@ -1569,8 +1667,14 @@
             </select>
           </div>
 
-          <div class="overflow-x-auto pb-2">
-            <div id="mission-queue-board" class="grid min-w-[1680px] grid-cols-8 gap-4"></div>
+          <div id="mission-queue-layout" class="pb-2">
+            <div id="mission-queue-scroll-shell">
+              <div id="mission-queue-board" class="grid grid-cols-8 gap-4"></div>
+            </div>
+            <aside id="mission-queue-side" aria-label="Mission queue agents">
+              <div class="mission-queue-separator" aria-hidden="true"></div>
+              <div id="mission-queue-agents"></div>
+            </aside>
           </div>
 
           <!-- Edit Task Modal -->
