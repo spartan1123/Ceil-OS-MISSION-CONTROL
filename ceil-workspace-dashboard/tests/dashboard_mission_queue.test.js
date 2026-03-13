@@ -81,6 +81,34 @@ test("filterFeedEvents splits task and agent events", () => {
   assert.deepEqual(missionQueue.filterFeedEvents(events, "all").map((event) => event.id), ["e1", "e2", "e3"]);
 });
 
+test("buildAgentPayloadFromForm normalizes required and optional fields", () => {
+  const payload = missionQueue.buildAgentPayloadFromForm({
+    name: "  Reliability / SRE  ",
+    role: "  Operations Reliability  ",
+    description: "   ",
+    avatar_emoji: "",
+    status: "standby",
+    model: "",
+    soul_md: "",
+    user_md: "notes",
+    agents_md: "",
+    workspace_id: "default",
+  });
+
+  assert.deepEqual(payload, {
+    name: "Reliability / SRE",
+    role: "Operations Reliability",
+    description: null,
+    avatar_emoji: "🤖",
+    status: "standby",
+    model: null,
+    soul_md: null,
+    user_md: "notes",
+    agents_md: null,
+    workspace_id: "default",
+  });
+});
+
 test("buildPayloadFromForm normalizes empty optional mission fields", () => {
   const payload = missionQueue.buildPayloadFromForm({
     title: "  Stabilize review lane  ",

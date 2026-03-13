@@ -118,6 +118,21 @@
     };
   }
 
+  function buildAgentPayloadFromForm(formState) {
+    return {
+      name: String(formState.name || "").trim(),
+      role: String(formState.role || "").trim(),
+      description: String(formState.description || "").trim() || null,
+      avatar_emoji: String(formState.avatar_emoji || "").trim() || "🤖",
+      status: formState.status || "standby",
+      model: String(formState.model || "").trim() || null,
+      soul_md: String(formState.soul_md || "").trim() || null,
+      user_md: String(formState.user_md || "").trim() || null,
+      agents_md: String(formState.agents_md || "").trim() || null,
+      workspace_id: formState.workspace_id || "default",
+    };
+  }
+
   function debounce(fn, wait) {
     let timer = null;
     return function debounced() {
@@ -200,6 +215,20 @@
       donePctEl: document.getElementById("stat-done-pct"),
       motivationEl: document.getElementById("tasks-motivation-badge"),
       chartCanvas: document.getElementById("tasks-donut-chart"),
+      agentModalEl: document.getElementById("agent-edit-modal"),
+      agentModalCloseBtn: document.getElementById("agent-modal-close-btn"),
+      agentModalTabs: Array.from(document.querySelectorAll(".mission-agent-modal-tab")),
+      agentNameEl: document.getElementById("agent-name"),
+      agentRoleEl: document.getElementById("agent-role"),
+      agentDescriptionEl: document.getElementById("agent-description"),
+      agentEmojiEl: document.getElementById("agent-emoji"),
+      agentStatusEl: document.getElementById("agent-status"),
+      agentModelEl: document.getElementById("agent-model"),
+      agentSoulEl: document.getElementById("agent-soul-md"),
+      agentUserEl: document.getElementById("agent-user-md"),
+      agentAgentsEl: document.getElementById("agent-agents-md"),
+      agentSaveBtn: document.getElementById("agent-save-btn"),
+      agentCancelBtn: document.getElementById("agent-cancel-btn"),
     };
 
     function setBanner(message, tone) {
@@ -370,8 +399,8 @@
         </div>
         <div class="mission-agents-list flex-1 space-y-2 overflow-y-auto pr-1">${listHtml}</div>
         <div class="mt-3 grid grid-cols-1 gap-2">
-          <button class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-300">+ Add Agent</button>
-          <button class="rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200">Import from Gateway</button>
+          <button id="mission-add-agent-btn" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-300">+ Add Agent</button>
+          <button id="mission-import-agent-btn" class="rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200">Import from Gateway</button>
         </div>
       `;
 
@@ -456,6 +485,16 @@
           renderBoard();
         });
       });
+      const addAgentBtn = refs.agentsRailEl.querySelector("#mission-add-agent-btn");
+      if (addAgentBtn) {
+        addAgentBtn.addEventListener("click", openAgentModal);
+      }
+      const importAgentBtn = refs.agentsRailEl.querySelector("#mission-import-agent-btn");
+      if (importAgentBtn) {
+        importAgentBtn.addEventListener("click", () => {
+          setBanner("Gateway import UI is next. Add Agent backend flow is now live.", "info");
+        });
+      }
 
       renderMetrics(visibleTasks);
     }
@@ -514,6 +553,72 @@
       state.editingTaskId = null;
       refs.modalEl.classList.add("hidden");
       refs.modalEl.classList.remove("flex");
+    }
+
+    function setAgentModalTab(tab) {
+      refs.agentModalTabs.forEach((button) => {
+        const isActive = button.getAttribute("data-agent-tab") === tab;
+        button.classList.toggle("active", isActive);
+      });
+      ["info", "soul", "user", "agents"].forEach((name) => {
+        const panelEl = document.getElementById(`agent-modal-panel-${name}`);
+        if (!panelEl) return;
+        panelEl.classList.toggle("hidden", name !== tab);
+      });
+    }
+
+    function openAgentModal() {
+      if (!refs.agentModalEl) return;
+      refs.agentNameEl.value = "";
+      refs.agentRoleEl.value = "";
+      refs.agentDescriptionEl.value = "";
+      refs.agentEmojiEl.value = "🤖";
+      refs.agentStatusEl.value = "standby";
+      refs.agentModelEl.value = "";
+      refs.agentSoulEl.value = "";
+      refs.agentUserEl.value = "";
+      refs.agentAgentsEl.value = "";
+      setAgentModalTab("info");
+      refs.agentModalEl.classList.remove("hidden");
+      refs.agentModalEl.classList.add("flex");
+      refs.agentNameEl.focus();
+    }
+
+    function closeAgentModal() {
+      if (!refs.agentModalEl) return;
+      refs.agentModalEl.classList.add("hidden");
+      refs.agentModalEl.classList.remove("flex");
+    }
+
+    async function saveAgent() {
+      const payload = buildAgentPayloadFromForm({
+        name: refs.agentNameEl.value,
+        role: refs.agentRoleEl.value,
+        description: refs.agentDescriptionEl.value,
+        avatar_emoji: refs.agentEmojiEl.value,
+        status: refs.agentStatusEl.value,
+        model: refs.agentModelEl.value,
+        soul_md: refs.agentSoulEl.value,
+        user_md: refs.agentUserEl.value,
+        agents_md: refs.agentAgentsEl.value,
+        workspace_id: state.workspaceId,
+      });
+      if (!payload.name || !payload.role) {
+        setBanner("Agent name and role are required.", "error");
+        return;
+      }
+      try {
+        const created = await requestJson("/api/mission-control/api/agents", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        state.agents = [created].concat(state.agents.filter((agent) => agent.id !== created.id));
+        closeAgentModal();
+        renderBoard();
+        setBanner(`Created agent \"${created.name}\".`, "info");
+      } catch (error) {
+        setBanner(error instanceof Error ? error.message : "Agent create failed.", "error");
+      }
     }
 
     async function saveTask() {
@@ -682,6 +787,19 @@
       if (event.target === refs.modalEl) closeModal();
     });
     refs.saveBtn.addEventListener("click", saveTask);
+    if (refs.agentModalEl) {
+      refs.agentModalEl.addEventListener("click", function (event) {
+        if (event.target === refs.agentModalEl) closeAgentModal();
+      });
+    }
+    if (refs.agentModalCloseBtn) refs.agentModalCloseBtn.addEventListener("click", closeAgentModal);
+    if (refs.agentCancelBtn) refs.agentCancelBtn.addEventListener("click", closeAgentModal);
+    if (refs.agentSaveBtn) refs.agentSaveBtn.addEventListener("click", saveAgent);
+    refs.agentModalTabs.forEach((button) => {
+      button.addEventListener("click", function () {
+        setAgentModalTab(String(button.getAttribute("data-agent-tab") || "info"));
+      });
+    });
 
     [
       [refs.assigneeFilterEl, "assignee"],
@@ -715,6 +833,7 @@
     filterAgentsByLane,
     filterFeedEvents,
     buildPayloadFromForm,
+    buildAgentPayloadFromForm,
     init,
   };
 });

@@ -475,6 +475,7 @@
         box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 30px rgba(2,6,23,.35);
       }
 
+      .mission-agent-modal-tab,
       .mission-side-tab-btn,
       .mission-agent-filter-btn,
       .mission-feed-filter-btn {
@@ -498,6 +499,7 @@
         color: rgba(203,213,225,.8);
       }
 
+      .mission-agent-modal-tab.active,
       .mission-side-tab-btn.active,
       .mission-agent-filter-btn.active,
       .mission-feed-filter-btn.active {
@@ -1712,6 +1714,51 @@
               <div class="mt-5 flex gap-3">
                 <button id="edit-save-btn" class="flex-1 rounded-xl bg-violet-600 py-2 text-sm font-semibold text-white transition hover:bg-violet-500">Save</button>
                 <button id="edit-cancel-btn" class="flex-1 rounded-xl border border-white/15 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/5">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add Agent Modal -->
+          <div id="agent-edit-modal" class="fixed inset-0 z-[55] hidden items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div class="w-full max-w-3xl rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-2xl">
+              <div class="mb-4 flex items-center justify-between gap-3">
+                <h3 class="text-base font-bold text-white">Create New Agent</h3>
+                <button id="agent-modal-close-btn" class="rounded-lg border border-white/15 px-2.5 py-1.5 text-sm text-slate-300 transition hover:bg-white/5">✕</button>
+              </div>
+              <div class="mb-4 grid grid-cols-4 gap-1 rounded-xl border border-white/10 bg-slate-900/55 p-1">
+                <button class="mission-agent-modal-tab active" data-agent-tab="info">Info</button>
+                <button class="mission-agent-modal-tab" data-agent-tab="soul">SOUL.md</button>
+                <button class="mission-agent-modal-tab" data-agent-tab="user">USER.md</button>
+                <button class="mission-agent-modal-tab" data-agent-tab="agents">AGENTS.md</button>
+              </div>
+              <div id="agent-modal-panel-info" class="mission-agent-modal-panel space-y-3">
+                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <input id="agent-name" type="text" placeholder="Agent name" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+                  <input id="agent-role" type="text" placeholder="Role (e.g. Reliability / SRE)" class="w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+                </div>
+                <textarea id="agent-description" placeholder="Description" class="min-h-[88px] w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"></textarea>
+                <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <input id="agent-emoji" type="text" maxlength="4" placeholder="🤖" class="rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+                  <select id="agent-status" class="rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500">
+                    <option value="standby">Standby</option>
+                    <option value="working">Working</option>
+                    <option value="offline">Offline</option>
+                  </select>
+                  <input id="agent-model" type="text" placeholder="Model (optional)" class="col-span-2 rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+                </div>
+              </div>
+              <div id="agent-modal-panel-soul" class="mission-agent-modal-panel hidden">
+                <textarea id="agent-soul-md" class="min-h-[280px] w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 font-mono text-xs text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" placeholder="# SOUL.md"></textarea>
+              </div>
+              <div id="agent-modal-panel-user" class="mission-agent-modal-panel hidden">
+                <textarea id="agent-user-md" class="min-h-[280px] w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 font-mono text-xs text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" placeholder="# USER.md"></textarea>
+              </div>
+              <div id="agent-modal-panel-agents" class="mission-agent-modal-panel hidden">
+                <textarea id="agent-agents-md" class="min-h-[280px] w-full rounded-lg border border-white/15 bg-slate-800 px-3 py-2 font-mono text-xs text-white focus:outline-none focus:ring-1 focus:ring-cyan-500" placeholder="# AGENTS.md"></textarea>
+              </div>
+              <div class="mt-4 flex gap-3">
+                <button id="agent-save-btn" class="flex-1 rounded-xl border border-cyan-400/35 bg-cyan-500/10 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20">Create Agent</button>
+                <button id="agent-cancel-btn" class="flex-1 rounded-xl border border-white/15 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/5">Cancel</button>
               </div>
             </div>
           </div>
