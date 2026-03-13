@@ -133,6 +133,17 @@
     };
   }
 
+  function buildGatewayImportPayload(candidates, selectedIds, workspaceId) {
+    const picked = candidates.filter((item) => selectedIds.has(String(item.id || "")) && !item.already_imported);
+    return {
+      agents: picked.map((item) => ({
+        gateway_agent_id: String(item.id || ""),
+        name: String(item.name || item.id || "Unnamed"),
+        workspace_id: workspaceId || "default",
+      })),
+    };
+  }
+
   function debounce(fn, wait) {
     let timer = null;
     return function debounced() {
@@ -177,6 +188,8 @@
       sideView: "agents",
       feedFilter: "all",
       feedEvents: [],
+      gatewayCandidates: [],
+      gatewaySelection: new Set(),
       dragTaskId: null,
       editingTaskId: null,
       chart: null,
@@ -229,6 +242,11 @@
       agentAgentsEl: document.getElementById("agent-agents-md"),
       agentSaveBtn: document.getElementById("agent-save-btn"),
       agentCancelBtn: document.getElementById("agent-cancel-btn"),
+      agentImportModalEl: document.getElementById("agent-import-modal"),
+      agentImportListEl: document.getElementById("agent-import-list"),
+      agentImportCloseBtn: document.getElementById("agent-import-close-btn"),
+      agentImportCancelBtn: document.getElementById("agent-import-cancel-btn"),
+      agentImportSaveBtn: document.getElementById("agent-import-save-btn"),
     };
 
     function setBanner(message, tone) {
@@ -491,9 +509,7 @@
       }
       const importAgentBtn = refs.agentsRailEl.querySelector("#mission-import-agent-btn");
       if (importAgentBtn) {
-        importAgentBtn.addEventListener("click", () => {
-          setBanner("Gateway import UI is next. Add Agent backend flow is now live.", "info");
-        });
+        importAgentBtn.addEventListener("click", openImportModal);
       }
 
       renderMetrics(visibleTasks);
@@ -618,6 +634,82 @@
         setBanner(`Created agent \"${created.name}\".`, "info");
       } catch (error) {
         setBanner(error instanceof Error ? error.message : "Agent create failed.", "error");
+      }
+    }
+
+    function renderImportCandidates() {
+      if (!refs.agentImportListEl) return;
+      if (!state.gatewayCandidates.length) {
+        refs.agentImportListEl.innerHTML = '<div class="rounded-xl border border-dashed border-white/12 bg-slate-950/30 px-3 py-6 text-center text-xs text-slate-500">No gateway agents found</div>';
+        return;
+      }
+      refs.agentImportListEl.innerHTML = state.gatewayCandidates.map((item) => {
+        const id = String(item.id || "");
+        const selected = state.gatewaySelection.has(id);
+        const imported = Boolean(item.already_imported);
+        return `
+          <label class="mb-2 flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${imported ? "border-emerald-400/25 bg-emerald-500/10" : "border-white/10 bg-slate-900/45"}">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold ${imported ? "text-emerald-200" : "text-slate-100"}">${escapeHtml(String(item.name || id))}</p>
+              <p class="truncate text-xs text-slate-400">${escapeHtml(id)}</p>
+            </div>
+            ${imported
+              ? '<span class="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200">Imported</span>'
+              : `<input type="checkbox" class="h-4 w-4" data-import-id="${escapeHtml(id)}" ${selected ? "checked" : ""} />`}
+          </label>
+        `;
+      }).join("");
+
+      refs.agentImportListEl.querySelectorAll("[data-import-id]").forEach((checkbox) => {
+        checkbox.addEventListener("change", function () {
+          const importId = String(checkbox.getAttribute("data-import-id") || "");
+          if (!importId) return;
+          if (checkbox.checked) state.gatewaySelection.add(importId);
+          else state.gatewaySelection.delete(importId);
+        });
+      });
+    }
+
+    async function openImportModal() {
+      if (!refs.agentImportModalEl) return;
+      state.gatewaySelection = new Set();
+      refs.agentImportModalEl.classList.remove("hidden");
+      refs.agentImportModalEl.classList.add("flex");
+      refs.agentImportListEl.innerHTML = '<div class="rounded-xl border border-white/10 bg-slate-900/45 px-3 py-6 text-center text-xs text-slate-300">Loading gateway agents…</div>';
+      try {
+        const payload = await requestJson("/api/mission-control/api/agents/discover");
+        state.gatewayCandidates = Array.isArray(payload && payload.agents) ? payload.agents : [];
+      } catch (_error) {
+        state.gatewayCandidates = [];
+        setBanner("Unable to load gateway agents.", "error");
+      }
+      renderImportCandidates();
+    }
+
+    function closeImportModal() {
+      if (!refs.agentImportModalEl) return;
+      refs.agentImportModalEl.classList.add("hidden");
+      refs.agentImportModalEl.classList.remove("flex");
+    }
+
+    async function saveImportedAgents() {
+      const payload = buildGatewayImportPayload(state.gatewayCandidates, state.gatewaySelection, state.workspaceId);
+      if (!payload.agents.length) {
+        setBanner("Select at least one gateway agent to import.", "error");
+        return;
+      }
+      try {
+        const result = await requestJson("/api/mission-control/api/agents/import", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        closeImportModal();
+        await loadTasks();
+        const imported = Array.isArray(result && result.imported) ? result.imported.length : payload.agents.length;
+        const skipped = Array.isArray(result && result.skipped) ? result.skipped.length : 0;
+        setBanner(`Imported ${imported} agent${imported === 1 ? "" : "s"}${skipped ? ` (${skipped} skipped)` : ""}.`, "info");
+      } catch (error) {
+        setBanner(error instanceof Error ? error.message : "Gateway import failed.", "error");
       }
     }
 
@@ -800,6 +892,14 @@
         setAgentModalTab(String(button.getAttribute("data-agent-tab") || "info"));
       });
     });
+    if (refs.agentImportModalEl) {
+      refs.agentImportModalEl.addEventListener("click", function (event) {
+        if (event.target === refs.agentImportModalEl) closeImportModal();
+      });
+    }
+    if (refs.agentImportCloseBtn) refs.agentImportCloseBtn.addEventListener("click", closeImportModal);
+    if (refs.agentImportCancelBtn) refs.agentImportCancelBtn.addEventListener("click", closeImportModal);
+    if (refs.agentImportSaveBtn) refs.agentImportSaveBtn.addEventListener("click", saveImportedAgents);
 
     [
       [refs.assigneeFilterEl, "assignee"],
@@ -834,6 +934,7 @@
     filterFeedEvents,
     buildPayloadFromForm,
     buildAgentPayloadFromForm,
+    buildGatewayImportPayload,
     init,
   };
 });

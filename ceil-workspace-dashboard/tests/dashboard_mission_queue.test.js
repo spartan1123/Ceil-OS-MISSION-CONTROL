@@ -109,6 +109,24 @@ test("buildAgentPayloadFromForm normalizes required and optional fields", () => 
   });
 });
 
+test("buildGatewayImportPayload keeps only selectable non-imported agents", () => {
+  const payload = missionQueue.buildGatewayImportPayload(
+    [
+      { id: 'alpha', name: 'Alpha Agent', already_imported: false },
+      { id: 'beta', name: 'Beta Agent', already_imported: true },
+      { id: 'gamma', name: 'Gamma Agent', already_imported: false },
+    ],
+    new Set(['alpha', 'beta']),
+    'default',
+  );
+
+  assert.deepEqual(payload, {
+    agents: [
+      { gateway_agent_id: 'alpha', name: 'Alpha Agent', workspace_id: 'default' },
+    ],
+  });
+});
+
 test("buildPayloadFromForm normalizes empty optional mission fields", () => {
   const payload = missionQueue.buildPayloadFromForm({
     title: "  Stabilize review lane  ",

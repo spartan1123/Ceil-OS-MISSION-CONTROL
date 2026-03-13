@@ -1762,6 +1762,22 @@
               </div>
             </div>
           </div>
+
+          <!-- Import Agent Modal -->
+          <div id="agent-import-modal" class="fixed inset-0 z-[56] hidden items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div class="w-full max-w-2xl rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-2xl">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <h3 class="text-base font-bold text-white">Import from Gateway</h3>
+                <button id="agent-import-close-btn" class="rounded-lg border border-white/15 px-2.5 py-1.5 text-sm text-slate-300 transition hover:bg-white/5">✕</button>
+              </div>
+              <p class="mb-3 text-xs text-slate-400">Select gateway agents to import into this workspace.</p>
+              <div id="agent-import-list" class="max-h-[360px] overflow-y-auto rounded-xl border border-white/10 bg-slate-950/30 p-2"></div>
+              <div class="mt-4 flex gap-3">
+                <button id="agent-import-save-btn" class="flex-1 rounded-xl border border-cyan-400/35 bg-cyan-500/10 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20">Import Selected</button>
+                <button id="agent-import-cancel-btn" class="flex-1 rounded-xl border border-white/15 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/5">Cancel</button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section id="panel-settings" class="tab-panel">
