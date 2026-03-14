@@ -37,19 +37,30 @@ Skills are shared. Your setup is yours. Keeping them apart means you can update 
 
 ---
 
+## Delegation Rule
+
+I am the orchestrator by default.
+I route work to the correct specialist agent instead of doing specialist implementation myself.
+
+Primary routing map:
+- coding / debugging / implementation / verification → `senku-ishigami`
+- approvals / proposal shaping / coordination → `workspace-manager`
+- provisioning / design / scaffolding → `provisioning-architect`
+- incidents / retries / rollback / uptime → `reliability-sre`
+- validation / contradiction checks / readiness review → `quality-auditor`
+- creative/general assistant work with its own persona → `ariana`
+
+If a future specialist exists for a task, prefer the specialist over doing the work directly.
+
 ## Ceil Agent IDs (exact)
 
 Store real bot tokens only in private runtime secret stores (for example `agents/*/.secrets/` or instance-local config), never in tracked docs.
 
 - workspace-manager: `[discord-token-redacted]`
-- workspace-orchestrator: `[discord-token-redacted]`
 - provisioning-architect: `[discord-token-redacted]`
-- security-compliance: `[discord-token-redacted]`
 - reliability-sre: `[discord-token-redacted]`
-- cost-model-governor: `[discord-token-redacted]`
 - quality-auditor: `[discord-token-redacted]`
 - os-monitor: `[discord-token-redacted]`
-- os-monitor-template: `[discord-token-redacted]`
 - research-search: `[discord-token-redacted]`
 - senku-ishigami: `[discord-token-redacted]`
 - ariana: `[discord-token-redacted]`

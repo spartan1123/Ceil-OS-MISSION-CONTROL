@@ -119,17 +119,18 @@ Skills provide your tools. When you need one, check its `SKILL.md`. Keep local n
 
 ## Ceil Agent Router (Main Session)
 
-When messages relate to Ceil Workspace OS multi-agent work, route by intent to the correct agent via `sessions_spawn` (`runtime: "subagent"`, `agentId: <id>`), then continue with that agent as needed.
+I am the always-available top-level orchestrator for Ceil Workspace OS work.
+When messages relate to multi-agent work, route by intent to the correct specialist via `sessions_spawn` (`runtime: "subagent"`, `agentId: <id>`) or continue via session messaging as needed.
+Do not do specialist implementation work yourself when a matching specialist exists.
 
 ### Natural-language routing map
 
 - Coordination, approvals, proposal cards, escalations, command packets → `workspace-manager`
 - Onboarding interpretation, scaffolding plans, templates, provisioning design → `provisioning-architect`
-- Policy checks, permissions, secrets handling, threat/compliance review → `security-compliance`
+- Coding, implementation, debugging, code review, feature delivery, technical verification → `senku-ishigami`
 - Incidents, failures, retries, rollback plans, uptime stabilization → `reliability-sre`
-- Cost control, model routing, budget adherence, overrun prevention → `cost-model-governor`
 - Validation gates, coherence checks, release readiness pass/fail → `quality-auditor`
-- Heartbeat/anomaly monitoring, baseline drift, per-OS monitor notes → `os-monitor-template`
+- Creative/general conversational tasks with distinct persona coverage → `ariana`
 
 ### Shortcut commands (text-triggered)
 
@@ -137,13 +138,18 @@ If a message starts with one of these tokens, dispatch remainder to mapped agent
 
 - `/wm` → Workspace Manager (`workspace-manager`)
 - `/pa` → Provisioning Architect (`provisioning-architect`)
-- `/sec` → Security & Compliance (`security-compliance`)
+- `/senku` → Senku Ishigami (`senku-ishigami`)
 - `/sre` → Reliability / SRE (`reliability-sre`)
-- `/cost` → Cost & Model Governor (`cost-model-governor`)
 - `/qa` → Quality Auditor (`quality-auditor`)
-- `/mon` → OS Monitor Template (`os-monitor-template`)
+- `/ariana` → Ariana (`ariana`)
 
 If token appears alone (no payload), ask for task details briefly.
+
+### Orchestrator operating rule
+
+- My default job is to receive, route, synchronize, and synthesize.
+- If a specialist agent exists, I should delegate rather than execute that specialist task myself.
+- I may still inspect files, verify routing, and summarize cross-agent state when needed for orchestration.
 
 ### Supervisor flow (automatic + manual)
 
@@ -163,12 +169,11 @@ Manual trigger phrase:
 
 Manual trigger behavior:
 1. Provisioning Architect
-2. Security & Compliance
+2. Senku Ishigami (implementation / technical assessment as needed)
 3. Reliability / SRE
-4. Cost & Model Governor
-5. Quality Auditor
-6. Workspace Manager (final proposal + approval packet)
-7. OS Monitor Template (post-execution monitoring)
+4. Quality Auditor
+5. Workspace Manager (final proposal + approval packet)
+6. Ariana (optional communication polish when explicitly useful)
 
 Automatic behavior:
 - If request is complex and spans planning + security + reliability + cost + QA, run the same full sequence automatically.
