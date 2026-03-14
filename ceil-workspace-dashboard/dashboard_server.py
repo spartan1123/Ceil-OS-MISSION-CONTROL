@@ -229,6 +229,15 @@ def find_config_for_port(default_config_path: str, port: int) -> str:
     raise RuntimeError(f"No gateway config found for port {port}")
 
 
+def runtime_replay_events(events: list[dict[str, object]], *, history_limit: int = 50, replay_limit: int = 10) -> list[dict[str, object]]:
+    history_slice = events[:history_limit]
+    return [item for item in history_slice if str(item.get("source") or "") == "runtime"][:replay_limit]
+
+
+def runtime_replay_signature(events: list[dict[str, object]]) -> str:
+    return "|".join(str(item.get("id") or "") for item in events)
+
+
 def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions: list[dict[str, object]], workspace_id: str = "default") -> dict[str, list[dict[str, object]]]:
     native_agents = native_store.list_agents(workspace_id)
     native_tasks = native_store.list_tasks(workspace_id)
@@ -688,11 +697,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         workspace_id = self._native_workspace_id(parsed)
         subscription = self.native_store.event_bus.subscribe(workspace_id)
         history = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)["events"]
-        runtime_signature = "|".join(
-            str(item.get("id") or "")
-            for item in history[:20]
-            if str(item.get("source") or "") == "runtime"
-        )
+        runtime_signature = runtime_replay_signature(runtime_replay_events(history))
 
         self.send_response(200)
         self._add_cors_headers_if_allowed()
@@ -709,11 +714,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 try:
                     event = subscription.queue.get(timeout=15)
                 except queue.Empty:
-                    runtime_events = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)["events"][:20]
-                    signature = "|".join(str(item.get("id") or "") for item in runtime_events)
+                    snapshot_events = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)["events"]
+                    runtime_events = runtime_replay_events(snapshot_events)
+                    signature = runtime_replay_signature(runtime_events)
                     if signature and signature != runtime_signature:
                         runtime_signature = signature
-                        for item in reversed(runtime_events[:10]):
+                        for item in reversed(runtime_events):
                             self.wfile.write(self.native_store.event_bus.format_sse(item))
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()

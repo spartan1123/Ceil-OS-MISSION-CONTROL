@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import queue
 import tempfile
 import threading
 import unittest
@@ -1008,6 +1009,65 @@ class DashboardServerTests(unittest.TestCase):
 
         self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
         self.assertTrue("business_os_seeded" in body or "task_created" in body)
+
+    def test_native_events_stream_idle_heartbeat_does_not_replay_mixed_history(self):
+        server = self.make_dashboard()
+        now_ms = int(dashboard_server.time.time() * 1000)
+        server.runtime_sessions_cache = {
+            "fetched_at": dashboard_server.time.monotonic(),
+            "sessions": [
+                {
+                    "key": "agent:senku-ishigami:webchat",
+                    "sessionId": "session-sse",
+                    "displayName": "senku-ishigami",
+                    "channel": "webchat",
+                    "updatedAt": now_ms,
+                    "model": "openai-codex/gpt-5.4",
+                }
+            ],
+        }
+
+        self.request(
+            server,
+            path="/api/mission-control/api/tasks",
+            payload={"title": "Mixed SSE history", "workspace_id": "default"},
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="POST",
+        ).read()
+
+        original_subscribe = server.native_store.event_bus.subscribe
+
+        class QueueSequence:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, timeout=None):
+                self.calls += 1
+                if self.calls == 1:
+                    raise queue.Empty()
+                raise ConnectionResetError("stop stream after heartbeat")
+
+        def subscribe_with_idle_heartbeat(workspace_id=None):
+            subscription = original_subscribe(workspace_id)
+            subscription.queue = QueueSequence()
+            return subscription
+
+        server.native_store.event_bus.subscribe = subscribe_with_idle_heartbeat
+        self.addCleanup(setattr, server.native_store.event_bus, "subscribe", original_subscribe)
+
+        with self.request(
+            server,
+            path="/api/mission-control/api/events/stream?workspace_id=default",
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="GET",
+        ) as resp:
+            body = resp.read().decode("utf-8")
+
+        self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
+        runtime_event_id = f"runtime-event:session-sse:{now_ms}"
+        self.assertEqual(body.count(runtime_event_id), 1)
+        self.assertIn(': heartbeat\n\n', body)
+        self.assertIn('"type": "task_created"', body)
 
     def test_runtime_snapshot_marks_synthetic_records_and_omits_stale_runtime_tasks(self):
         store = dashboard_server.NativeDashboardStore(self.native_state_path)
