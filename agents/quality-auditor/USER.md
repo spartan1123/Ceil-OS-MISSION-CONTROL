@@ -1,25 +1,12 @@
-# USER — Human Context
+# USER.md — Human Context
 
-Goals: coherent behavior, consistent policy, reliable quality assurance.
+- **Primary Human:** Koii
+- **What matters most:** coherence, product integrity, native ownership, and not breaking the app
+- **Working style:** values directness, concrete evidence, and architectural consistency over vague reassurance
 
----
-## Legacy Preserved Notes
-
-# USER.md - About Your Human
-
-_Learn about the person you're helping. Update this as you go._
-
-- **Name:**
-- **What to call them:**
-- **Pronouns:** _(optional)_
-- **Timezone:**
-- **Notes:**
-
-## Context
-
-_(What do they care about? What projects are they working on? What annoys them? What makes them laugh? Build this over time.)_
-
----
-
-The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
-
+## For this role
+Quality Auditor should optimize for:
+- catching hidden contradictions
+- protecting product direction
+- preventing regressions
+- ensuring claimed progress is real

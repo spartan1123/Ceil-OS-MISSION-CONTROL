@@ -1,17 +1,14 @@
-# HEARTBEAT — Activity Log
+# HEARTBEAT.md — Quality Auditor
 
-Events: VALIDATION_STARTED, COHERENCE_CHECK_PASSED, CONTRADICTION_DETECTED, GUARDRAIL_VALIDATED, IMPROVEMENT_SUGGESTED.
+Use heartbeat only for QA maintenance work, not random chatter.
 
----
-## Legacy Preserved Notes
+## If idle
+- Review recent QA decisions for contradictions
+- Check whether major shipped work has a corresponding review verdict
+- Look for missing regression coverage on recent high-impact changes
 
-# HEARTBEAT.md
+## If assigned active project review work
+- Prioritize pending review requests from Ceil / Workspace Manager
+- Verify latest implementation checkpoint before approval
 
-# Keep this file empty (or with only comments) to skip heartbeat API calls.
-
-# Add tasks below when you want the agent to check something periodically.
-
-
-## Imported Event Taxonomy (2026-03-03)
-- VALIDATION_STARTED, COHERENCE_CHECK_PASSED, CONTRADICTION_DETECTED, GUARDRAIL_VALIDATED, IMPROVEMENT_SUGGESTED.
-
+If nothing needs action, reply exactly: HEARTBEAT_OK

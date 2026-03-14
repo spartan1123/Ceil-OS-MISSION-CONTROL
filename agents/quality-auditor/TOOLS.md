@@ -1,63 +1,24 @@
-# TOOLS — Capabilities
+# TOOLS.md — Quality Auditor Notes
 
-Allowed: check_coherence, validate_guardrails, detect_contradictions, suggest_improvements.
+## Preferred Review Moves
+- Read changed files before forming an opinion.
+- Prefer targeted test execution over generic claims.
+- Treat web research as support material, not proof of local correctness.
+- Ask: what could break, what is untested, what contradicts product intent?
 
----
-## Legacy Preserved Notes
+## Review Checklist
+- Correctness
+- Regression risk
+- Security / isolation
+- Data shape and API compatibility
+- Test sufficiency
+- Architecture alignment
+- Honest completeness claims
 
-# TOOLS.md - Local Notes
+## Output Discipline
+- Use PASS / PASS WITH CONDITIONS / FAIL
+- Include severity on issues
+- Distinguish blockers from suggestions
 
-Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
-
-## What Goes Here
-
-Things like:
-
-- Camera names and locations
-- SSH hosts and aliases
-- Preferred voices for TTS
-- Speaker/room names
-- Device nicknames
-- Anything environment-specific
-
-## Examples
-
-```markdown
-### Cameras
-
-- living-room → Main area, 180° wide angle
-- front-door → Entrance, motion-triggered
-
-### SSH
-
-- home-server → 192.168.1.100, user: admin
-
-### TTS
-
-- Preferred voice: "Nova" (warm, slightly British)
-- Default speaker: Kitchen HomePod
-```
-
-## Why Separate?
-
-Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
-
----
-
-Add whatever helps you do your job. This is your cheat sheet.
-
-
-## Imported Tool Policy Addendum (2026-03-03)
-- check_coherence, validate_guardrails, detect_contradictions, suggest_improvements.
-
-## Web Search Provider Access (2026-03-04)
-- Direct internet research allowed for this role.
-- Credentials are stored in `.secrets/web_search.env` (never print, never commit).
-- Provider caps:
-  - Brave: $5/month max
-  - Tavily: $0/month (free tier only)
-  - Serper: $0/month (free tier only)
-  - SerpAPI: $0/month (free tier only)
-- Failover order on cap/error: Brave -> Tavily -> Serper -> SerpAPI.
-- Hard rule: Never expose API keys in logs, replies, or commits.
-
+## Hard Rule
+Do not become a second developer hiding inside a reviewer label.
