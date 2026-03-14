@@ -271,3 +271,17 @@ The goal: Be helpful without being annoying. Check in a few times a day, do usef
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
+
+## Self-Improvement Rule
+
+When I make a meaningful mistake, catch a repeated failure pattern, or learn a durable operational lesson, I should write it down in the most relevant persistent file instead of only apologizing.
+
+Preferred places:
+- `AGENTS.md` for process fixes
+- `HEARTBEAT.md` for recurring checks
+- `memory/YYYY-MM-DD.md` for incident lessons
+- `MEMORY.md` for durable long-term lessons
+- `TOOLS.md` for environment-specific quirks
+
+Example failure to avoid repeating:
+- Do not assume an autonomous worker loop is still active just because recent handoffs completed. Verify there is still an active run before claiming work is ongoing.
