@@ -10,6 +10,7 @@ import json
 import os
 import queue
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -105,6 +106,43 @@ def now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def iso_from_epoch_ms(value: int | float | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value) / 1000.0, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def normalize_runtime_agent_slug(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    if raw == "main":
+        return "workspace-orchestrator"
+    return raw
+
+
+def runtime_agent_slug_from_session_key(session_key: str | None) -> str:
+    parts = str(session_key or "").split(":")
+    if len(parts) >= 2 and parts[0] == "agent":
+        return normalize_runtime_agent_slug(parts[1])
+    return ""
+
+
+def runtime_task_status(updated_at_ms: int | float | None, now_ms: float | None = None) -> str:
+    if updated_at_ms is None:
+        return "in_progress"
+    current_ms = float(now_ms if now_ms is not None else time.time() * 1000.0)
+    age_ms = max(0.0, current_ms - float(updated_at_ms))
+    if age_ms <= 45 * 60 * 1000:
+        return "in_progress"
+    if age_ms <= 24 * 60 * 60 * 1000:
+        return "assigned"
+    return "done"
+
+
 def participant_slug(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -193,6 +231,140 @@ def find_config_for_port(default_config_path: str, port: int) -> str:
     raise RuntimeError(f"No gateway config found for port {port}")
 
 
+def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions: list[dict[str, object]], workspace_id: str = "default") -> dict[str, list[dict[str, object]]]:
+    native_agents = native_store.list_agents(workspace_id)
+    native_tasks = native_store.list_tasks(workspace_id)
+    native_events = native_store.list_events(workspace_id)
+    now_ms = time.time() * 1000.0
+
+    latest_by_slug: dict[str, dict[str, object]] = {}
+    for session in runtime_sessions:
+        slug = runtime_agent_slug_from_session_key(str(session.get("key") or ""))
+        if not slug:
+            continue
+        current = latest_by_slug.get(slug)
+        updated = float(session.get("updatedAt") or 0)
+        current_updated = float(current.get("updatedAt") or 0) if current else -1.0
+        if current is None or updated >= current_updated:
+            latest_by_slug[slug] = session
+
+    enriched_agents: list[dict[str, object]] = []
+    covered_slugs: set[str] = set()
+    for agent in native_agents:
+        enriched = dict(agent)
+        slug_candidates = {
+            normalize_runtime_agent_slug(str(agent.get("gateway_agent_id") or "")),
+            normalize_runtime_agent_slug(participant_slug(str(agent.get("name") or ""))),
+        }
+        slug_candidates.discard("")
+        covered_slugs.update(slug_candidates)
+        latest_session = next((latest_by_slug[slug] for slug in slug_candidates if slug in latest_by_slug), None)
+        if latest_session:
+            updated_ms = latest_session.get("updatedAt")
+            enriched["model"] = latest_session.get("model") or enriched.get("model")
+            enriched["effective_status"] = "active" if runtime_task_status(updated_ms, now_ms) == "in_progress" else "standby"
+            enriched["live_session_key"] = latest_session.get("key")
+            enriched["live_updated_at"] = iso_from_epoch_ms(updated_ms if isinstance(updated_ms, (int, float)) else None)
+        enriched_agents.append(enriched)
+
+    slug_to_name = {normalize_runtime_agent_slug(participant_slug(name)): name for name in DEFAULT_PARTICIPANT_TO_SLUG}
+    for slug, latest_session in latest_by_slug.items():
+        if slug in covered_slugs:
+            continue
+        updated_ms = latest_session.get("updatedAt")
+        display_name = slug_to_name.get(slug) or str(latest_session.get("displayName") or slug).split(":")[-1].replace("-", " ").title()
+        enriched_agents.append({
+            "id": f"runtime-agent:{slug}",
+            "name": display_name,
+            "role": "Live Runtime Agent",
+            "description": "Synthesized from active OpenClaw runtime session data.",
+            "avatar_emoji": "⚡",
+            "status": "standby",
+            "effective_status": "active" if runtime_task_status(updated_ms, now_ms) == "in_progress" else "standby",
+            "is_master": 1 if slug == "workspace-orchestrator" else 0,
+            "workspace_id": workspace_id,
+            "source": "runtime",
+            "gateway_agent_id": slug,
+            "model": latest_session.get("model"),
+            "live_session_key": latest_session.get("key"),
+            "live_updated_at": iso_from_epoch_ms(updated_ms if isinstance(updated_ms, (int, float)) else None),
+            "updated_at": iso_from_epoch_ms(updated_ms if isinstance(updated_ms, (int, float)) else None),
+            "created_at": iso_from_epoch_ms(updated_ms if isinstance(updated_ms, (int, float)) else None),
+        })
+
+    agent_id_by_slug: dict[str, str] = {}
+    for agent in enriched_agents:
+        agent_id = str(agent.get("id") or "")
+        for value in (agent.get("gateway_agent_id"), participant_slug(str(agent.get("name") or ""))):
+            slug = normalize_runtime_agent_slug(str(value or ""))
+            if slug and agent_id:
+                agent_id_by_slug[slug] = agent_id
+
+    synthetic_tasks: list[dict[str, object]] = []
+    synthetic_events: list[dict[str, object]] = []
+    for session in runtime_sessions:
+        session_key = str(session.get("key") or "")
+        slug = runtime_agent_slug_from_session_key(session_key)
+        if not slug:
+            continue
+        updated_ms_raw = session.get("updatedAt")
+        updated_ms = float(updated_ms_raw) if isinstance(updated_ms_raw, (int, float)) else None
+        if updated_ms is None:
+            continue
+        age_ms = now_ms - updated_ms
+        if age_ms > 3 * 24 * 60 * 60 * 1000:
+            continue
+        updated_iso = iso_from_epoch_ms(updated_ms)
+        display_name = str(session.get("displayName") or session.get("channel") or session_key)
+        status = runtime_task_status(updated_ms, now_ms)
+        agent_id = agent_id_by_slug.get(slug)
+        synthetic_tasks.append({
+            "id": f"runtime-task:{session.get('sessionId') or session_key}",
+            "title": f"Live session · {display_name}",
+            "description": f"Runtime-derived activity from {display_name}",
+            "status": status,
+            "priority": "medium",
+            "workspace_id": workspace_id,
+            "assigned_agent_id": agent_id,
+            "source": "runtime",
+            "created_at": updated_iso,
+            "updated_at": updated_iso,
+        })
+        synthetic_events.append({
+            "id": f"runtime-event:{session.get('sessionId') or session_key}:{int(updated_ms)}",
+            "type": "agent_runtime_activity",
+            "agent_id": agent_id,
+            "task_id": f"runtime-task:{session.get('sessionId') or session_key}",
+            "message": f"{slug} active on {display_name}",
+            "metadata": {
+                "source": "runtime",
+                "session_key": session_key,
+                "channel": session.get("channel"),
+                "model": session.get("model"),
+            },
+            "created_at": updated_iso,
+            "agent_name": None,
+            "agent_emoji": None,
+            "task_title": f"Live session · {display_name}",
+            "workspace_id": workspace_id,
+            "source": "runtime",
+        })
+
+    existing_task_ids = {str(item.get("id") or "") for item in native_tasks}
+    merged_tasks = list(native_tasks)
+    for task in synthetic_tasks:
+        if str(task.get("id") or "") not in existing_task_ids:
+            merged_tasks.append(task)
+
+    merged_events = sorted(list(native_events) + synthetic_events, key=lambda item: str(item.get("created_at") or ""), reverse=True)[:200]
+
+    return {
+        "agents": enriched_agents,
+        "tasks": sorted(merged_tasks, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True),
+        "events": merged_events,
+    }
+
+
 class DashboardHandler(SimpleHTTPRequestHandler):
     server_version = "CeilDashboard/1.0"
 
@@ -278,6 +450,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     @property
     def mission_control_auth(self) -> dict[str, str]:
         return self.server.mission_control_auth  # type: ignore[attr-defined]
+
+    def _invoke_runtime_tool(self, tool: str, action: str | None, args: dict | None = None, *, port: int = 18789) -> dict[str, object] | None:
+        payload: dict[str, object] = {"tool": tool}
+        if action:
+            payload["action"] = action
+        if args is not None:
+            payload["args"] = args
+        config_for_port = find_config_for_port(self.config_path, port)
+        token = load_gateway_token(config_for_port)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/tools/invoke",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            response_payload = json.loads(resp.read().decode("utf-8"))
+        if not response_payload.get("ok"):
+            return None
+        result = response_payload.get("result")
+        return result if isinstance(result, dict) else None
+
+    def _runtime_sessions(self) -> list[dict[str, object]]:
+        cache = getattr(self.server, "runtime_sessions_cache", None)  # type: ignore[attr-defined]
+        now_monotonic = time.monotonic()
+        if isinstance(cache, dict) and now_monotonic - float(cache.get("fetched_at") or 0.0) < 5.0:
+            sessions = cache.get("sessions")
+            return sessions if isinstance(sessions, list) else []
+        try:
+            result = self._invoke_runtime_tool("sessions_list", "json", {}, port=18789)
+            details = result.get("details") if isinstance(result, dict) else None
+            sessions = details.get("sessions") if isinstance(details, dict) else None
+            normalized = sessions if isinstance(sessions, list) else []
+        except Exception:
+            normalized = []
+        self.server.runtime_sessions_cache = {"fetched_at": now_monotonic, "sessions": normalized}  # type: ignore[attr-defined]
+        return normalized
 
     def _add_cors_headers_if_allowed(self) -> None:
         allowed, origin = self._resolve_origin()
@@ -468,7 +680,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def _handle_native_events_stream(self, parsed) -> None:
         workspace_id = self._native_workspace_id(parsed)
         subscription = self.native_store.event_bus.subscribe(workspace_id)
-        history = self.native_store.list_events(workspace_id)
+        runtime_signature = ""
+        history = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)["events"]
 
         self.send_response(200)
         self._add_cors_headers_if_allowed()
@@ -485,6 +698,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 try:
                     event = subscription.queue.get(timeout=15)
                 except queue.Empty:
+                    runtime_events = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)["events"][:20]
+                    signature = "|".join(str(item.get("id") or "") for item in runtime_events)
+                    if signature and signature != runtime_signature:
+                        runtime_signature = signature
+                        for item in reversed(runtime_events[:10]):
+                            self.wfile.write(self.native_store.event_bus.format_sse(item))
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
                     continue
@@ -498,14 +717,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def _handle_native_get(self, parsed) -> bool:
         path = parsed.path
         workspace_id = self._native_workspace_id(parsed)
+        runtime_snapshot = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)
         if path == "/api/mission-control/api/tasks":
-            self._write_json(200, self.native_store.list_tasks(workspace_id))
+            self._write_json(200, runtime_snapshot["tasks"])
             return True
         if path == "/api/mission-control/api/agents":
-            self._write_json(200, self.native_store.list_agents(workspace_id))
+            self._write_json(200, runtime_snapshot["agents"])
             return True
         if path == "/api/mission-control/api/events":
-            self._write_json(200, self.native_store.list_events(workspace_id))
+            self._write_json(200, runtime_snapshot["events"])
             return True
         if path == "/api/mission-control/api/events/stream":
             self._handle_native_events_stream(parsed)
