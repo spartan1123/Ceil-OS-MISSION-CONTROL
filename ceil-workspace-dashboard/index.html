@@ -2504,7 +2504,11 @@
           const weekISO  = startOfWeekISO();
 
           const [todayRes, latestRes, weekTotalRes, weekSuccessRes] = await Promise.all([
-            supabaseClient.from("agent_logs").select("agent_name, created_at").gte("created_at", todayISO).limit(5000),
+            supabaseClient
+              .from("agent_logs")
+              .select("agent_name, task_description, status, created_at")
+              .gte("created_at", todayISO)
+              .limit(5000),
             supabaseClient.from("agent_logs").select("agent_name, model_used, status, created_at").order("created_at", { ascending: false }).limit(1500),
             supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO),
             supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO).ilike("status", "%completed%"),
