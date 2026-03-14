@@ -79,12 +79,61 @@
   }
 
   function inferAgentActivityState(agent, tasks) {
-    const status = String(agent && agent.status ? agent.status : "").toLowerCase();
+    const status = String(agent && (agent.effective_status || agent.status) ? (agent.effective_status || agent.status) : "").toLowerCase();
     const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent && agent.id ? agent.id : "")).length;
-    if (["working", "active", "busy", "running"].includes(status) || assignedCount > 0) {
+    if (["working", "active", "busy", "running", "in_progress"].includes(status) || assignedCount > 0) {
       return AGENT_LANES.working;
     }
     return AGENT_LANES.standby;
+  }
+
+  function getAgentSourceMeta(agent) {
+    const source = String(agent && agent.source ? agent.source : "").toLowerCase();
+    const gatewayAgentId = String(agent && agent.gateway_agent_id ? agent.gateway_agent_id : "").trim();
+    if (source === "gateway" || gatewayAgentId) {
+      return {
+        label: "Gateway-linked",
+        detail: gatewayAgentId || "Imported from gateway",
+        tone: "border-cyan-400/30 bg-cyan-500/10 text-cyan-200",
+      };
+    }
+    return {
+      label: "Local",
+      detail: "Created inside Mission Control",
+      tone: "border-violet-400/30 bg-violet-500/10 text-violet-200",
+    };
+  }
+
+  function getAgentStatusMeta(agent, tasks) {
+    const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent && agent.id ? agent.id : "")).length;
+    const rawStatus = String(agent && (agent.effective_status || agent.status) ? (agent.effective_status || agent.status) : "standby").trim();
+    const normalized = rawStatus.toLowerCase();
+    const lane = inferAgentActivityState(agent, tasks);
+    if (assignedCount > 0) {
+      return {
+        label: `${assignedCount} active task${assignedCount === 1 ? "" : "s"}`,
+        chip: "Assigned",
+        dot: "bg-emerald-400",
+        tone: "border-emerald-400/30 bg-emerald-500/10 text-emerald-200",
+        lane,
+      };
+    }
+    if (["working", "active", "busy", "running", "in_progress"].includes(normalized)) {
+      return {
+        label: rawStatus.replaceAll("_", " "),
+        chip: "Working",
+        dot: "bg-cyan-300",
+        tone: "border-cyan-300/40 bg-cyan-500/15 text-cyan-200",
+        lane,
+      };
+    }
+    return {
+      label: rawStatus.replaceAll("_", " "),
+      chip: "Standby",
+      dot: "bg-slate-500",
+      tone: "border-slate-400/30 bg-slate-500/10 text-slate-300",
+      lane,
+    };
   }
 
   function filterAgentsByLane(agents, lane, tasks) {
@@ -364,14 +413,10 @@
 
       const listHtml = agents.length
         ? agents.map((agent) => {
-            const lane = inferAgentActivityState(agent, tasks);
             const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent.id)).length;
-            const statusLabel = lane === AGENT_LANES.working ? "WORKING" : "STANDBY";
-            const statusTone = lane === AGENT_LANES.working
-              ? "border-cyan-300/40 bg-cyan-500/15 text-cyan-200"
-              : "border-slate-400/30 bg-slate-500/10 text-slate-300";
+            const statusMeta = getAgentStatusMeta(agent, tasks);
+            const sourceMeta = getAgentSourceMeta(agent);
             const role = String(agent.role || agent.specialty || agent.description || "Mission specialist").slice(0, 44);
-            const healthText = agent.openclaw_enabled ? "OpenClaw Connected" : "Gateway Pending";
             return `
               <article class="mission-agent-card rounded-xl border border-white/10 bg-[#11172a]/80 p-2.5">
                 <div class="flex items-start justify-between gap-2">
@@ -379,13 +424,14 @@
                     <p class="truncate text-sm font-semibold text-slate-100">${escapeHtml(agent.name || "Unknown Agent")}</p>
                     <p class="truncate text-xs text-slate-400">${escapeHtml(role)}</p>
                   </div>
-                  <span class="rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${statusTone}">${statusLabel}</span>
+                  <span class="rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${statusMeta.tone}">${escapeHtml(statusMeta.chip)}</span>
                 </div>
                 <div class="mt-2 flex items-center justify-between text-[11px] text-slate-300">
-                  <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full ${lane === AGENT_LANES.working ? "bg-emerald-400" : "bg-slate-500"}"></span>${lane === AGENT_LANES.working ? "Active" : "Idle"}</span>
+                  <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full ${statusMeta.dot}"></span>${escapeHtml(statusMeta.label)}</span>
                   <span>${assignedCount} task${assignedCount === 1 ? "" : "s"}</span>
                 </div>
-                <div class="mt-2 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-center text-xs font-semibold text-emerald-200">${escapeHtml(healthText)}</div>
+                <div class="mt-2 rounded-lg border px-2 py-1 text-center text-xs font-semibold ${sourceMeta.tone}">${escapeHtml(sourceMeta.label)}</div>
+                <p class="mt-1 truncate text-[10px] uppercase tracking-[0.14em] text-slate-500">${escapeHtml(sourceMeta.detail)}</p>
               </article>
             `;
           }).join("")
@@ -417,8 +463,9 @@
         </div>
         <div class="mission-agents-list flex-1 space-y-2 overflow-y-auto pr-1">${listHtml}</div>
         <div class="mt-3 grid grid-cols-1 gap-2">
-          <button id="mission-add-agent-btn" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-300">+ Add Agent</button>
-          <button id="mission-import-agent-btn" class="rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200">Import from Gateway</button>
+          <button id="mission-add-agent-btn" class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-300">+ Add Local Agent</button>
+          <button id="mission-import-agent-btn" class="rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-200">Import Gateway Agent</button>
+          <p class="text-[10px] uppercase tracking-[0.14em] text-slate-500">Local agents live only in Mission Control. Gateway imports stay linked to a real OpenClaw agent id.</p>
         </div>
       `;
 
@@ -930,6 +977,8 @@
     summarizeBoard,
     filterTasks,
     inferAgentActivityState,
+    getAgentStatusMeta,
+    getAgentSourceMeta,
     filterAgentsByLane,
     filterFeedEvents,
     buildPayloadFromForm,

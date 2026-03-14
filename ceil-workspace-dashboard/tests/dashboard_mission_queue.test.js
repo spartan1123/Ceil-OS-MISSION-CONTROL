@@ -81,6 +81,52 @@ test("filterFeedEvents splits task and agent events", () => {
   assert.deepEqual(missionQueue.filterFeedEvents(events, "all").map((event) => event.id), ["e1", "e2", "e3"]);
 });
 
+test("getAgentStatusMeta prefers effective status and assignments", () => {
+  const tasks = [{ id: "t-1", assigned_agent_id: "agent-2" }];
+
+  assert.deepEqual(
+    missionQueue.getAgentStatusMeta({ id: "agent-1", status: "standby", effective_status: "running" }, []),
+    {
+      label: "running",
+      chip: "Working",
+      dot: "bg-cyan-300",
+      tone: "border-cyan-300/40 bg-cyan-500/15 text-cyan-200",
+      lane: "working",
+    },
+  );
+
+  assert.deepEqual(
+    missionQueue.getAgentStatusMeta({ id: "agent-2", status: "standby" }, tasks),
+    {
+      label: "1 active task",
+      chip: "Assigned",
+      dot: "bg-emerald-400",
+      tone: "border-emerald-400/30 bg-emerald-500/10 text-emerald-200",
+      lane: "working",
+    },
+  );
+});
+
+test("getAgentSourceMeta distinguishes local and gateway-linked agents", () => {
+  assert.deepEqual(
+    missionQueue.getAgentSourceMeta({ source: "gateway", gateway_agent_id: "senku-ishigami" }),
+    {
+      label: "Gateway-linked",
+      detail: "senku-ishigami",
+      tone: "border-cyan-400/30 bg-cyan-500/10 text-cyan-200",
+    },
+  );
+
+  assert.deepEqual(
+    missionQueue.getAgentSourceMeta({ source: "manual" }),
+    {
+      label: "Local",
+      detail: "Created inside Mission Control",
+      tone: "border-violet-400/30 bg-violet-500/10 text-violet-200",
+    },
+  );
+});
+
 test("buildAgentPayloadFromForm normalizes required and optional fields", () => {
   const payload = missionQueue.buildAgentPayloadFromForm({
     name: "  Reliability / SRE  ",
