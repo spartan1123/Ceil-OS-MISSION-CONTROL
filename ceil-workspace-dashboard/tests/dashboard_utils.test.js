@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const utils = require('../dashboard-utils.js');
 
 const AGENTS = [
@@ -103,4 +104,29 @@ test('housekeeping and completion helpers classify tasks correctly', () => {
 test('formatTimestamp returns fallback for empty or invalid values', () => {
   assert.equal(utils.formatTimestamp(''), 'No data yet');
   assert.equal(utils.formatTimestamp('not-a-date'), 'No data yet');
+});
+
+test('Toronto runtime keeps day/week boundary helpers aligned across DST', () => {
+  const script = `
+    const assert = require('node:assert/strict');
+    const utils = require('./dashboard-utils.js');
+    const input = new Date('2026-03-08T16:22:11.000Z');
+    const today = new Date(utils.startOfTodayISO(input));
+    const week = new Date(utils.startOfWeekISO(input));
+    assert.equal(today.toISOString(), '2026-03-08T05:00:00.000Z');
+    assert.equal(week.toISOString(), '2026-03-02T05:00:00.000Z');
+    console.log(JSON.stringify({ today: today.toISOString(), week: week.toISOString() }));
+  `;
+
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: { ...process.env, TZ: 'America/Toronto' },
+    encoding: 'utf8',
+  });
+
+  const parsed = JSON.parse(output.trim());
+  assert.deepEqual(parsed, {
+    today: '2026-03-08T05:00:00.000Z',
+    week: '2026-03-02T05:00:00.000Z',
+  });
 });

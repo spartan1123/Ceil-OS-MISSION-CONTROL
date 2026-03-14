@@ -2514,6 +2514,11 @@
             supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO).ilike("status", "%completed%"),
           ]);
 
+          if (todayRes.error) throw todayRes.error;
+          if (latestRes.error) throw latestRes.error;
+          if (weekTotalRes.error) throw weekTotalRes.error;
+          if (weekSuccessRes.error) throw weekSuccessRes.error;
+
           const orgChart = buildOrgChartStats({
             agents: CEIL_AGENTS,
             latestEntries: latestRes.data || [],

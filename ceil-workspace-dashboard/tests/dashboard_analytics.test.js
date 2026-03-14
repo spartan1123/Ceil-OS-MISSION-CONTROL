@@ -129,3 +129,39 @@ test('buildOrgChartStats returns per-agent stats and derived metrics', () => {
   assert.equal(org.statsByName.get('Senku Ishigami').tasksToday, 1);
   assert.equal(org.statsByName.get('Workspace Manager').latest.model_used, 'y');
 });
+
+test('buildOrgChartStats keeps housekeeping out of totals and leaves zero-task agents on standby', () => {
+  const org = analytics.buildOrgChartStats({
+    agents: AGENTS,
+    latestEntries: [
+      { agent_name: 'senku-ishigami', task_description: 'Heartbeat', model_used: 'gpt-heartbeat', status: 'completed', created_at: '2026-03-08T10:30:00Z' },
+      { agent_name: 'senku-ishigami', task_description: 'Ship org chart fix', model_used: 'gpt-ship', status: 'completed', created_at: '2026-03-08T10:00:00Z' },
+      { agent_name: 'workspace-manager', task_description: 'Coordinate release', model_used: 'gpt-manage', status: 'completed', created_at: '2026-03-08T11:00:00Z' },
+    ],
+    todayEntries: [
+      { agent_name: 'senku-ishigami', task_description: 'Ship org chart fix', status: 'completed', created_at: '2026-03-08T10:00:00Z' },
+      { agent_name: 'senku-ishigami', task_description: 'Heartbeat', status: 'completed', created_at: '2026-03-08T10:30:00Z' },
+      { agent_name: 'workspace-manager', task_description: 'Coordinate release', status: 'success', created_at: '2026-03-08T11:00:00Z' },
+      { agent_name: 'security-compliance', task_description: 'Supabase logging smoke test', status: 'completed', created_at: '2026-03-08T11:30:00Z' },
+      { agent_name: 'security-compliance', task_description: 'Policy review still running', status: 'running', created_at: '2026-03-08T11:45:00Z' },
+    ],
+    weekTotalCount: 10,
+    weekSuccessCount: 7,
+    resolveAgentFromLogName: resolver.resolveAgentFromLogName,
+    isCountableTask: utils.isCountableTask,
+  });
+
+  const senku = org.statsByName.get('Senku Ishigami');
+  const manager = org.statsByName.get('Workspace Manager');
+  const security = org.statsByName.get('Security & Compliance');
+
+  assert.equal(senku.tasksToday, 1);
+  assert.equal(manager.tasksToday, 1);
+  assert.equal(security.tasksToday, 0);
+  assert.equal(org.metrics.totalToday, 2);
+  assert.equal(org.metrics.activeToday, 2);
+  assert.equal(senku.tasksToday > 0, true);
+  assert.equal(security.tasksToday > 0, false);
+  assert.equal(senku.latest.model_used, 'gpt-heartbeat');
+  assert.equal(manager.latest.model_used, 'gpt-manage');
+});
