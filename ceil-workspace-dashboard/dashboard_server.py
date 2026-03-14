@@ -138,9 +138,7 @@ def runtime_task_status(updated_at_ms: int | float | None, now_ms: float | None 
     age_ms = max(0.0, current_ms - float(updated_at_ms))
     if age_ms <= 45 * 60 * 1000:
         return "in_progress"
-    if age_ms <= 24 * 60 * 60 * 1000:
-        return "assigned"
-    return "done"
+    return "assigned"
 
 
 def participant_slug(value: str) -> str:
@@ -284,6 +282,8 @@ def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions:
             "is_master": 1 if slug == "workspace-orchestrator" else 0,
             "workspace_id": workspace_id,
             "source": "runtime",
+            "synthetic": True,
+            "runtime_derived": True,
             "gateway_agent_id": slug,
             "model": latest_session.get("model"),
             "live_session_key": latest_session.get("key"),
@@ -312,14 +312,15 @@ def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions:
         if updated_ms is None:
             continue
         age_ms = now_ms - updated_ms
-        if age_ms > 3 * 24 * 60 * 60 * 1000:
+        if age_ms > 24 * 60 * 60 * 1000:
             continue
         updated_iso = iso_from_epoch_ms(updated_ms)
         display_name = str(session.get("displayName") or session.get("channel") or session_key)
         status = runtime_task_status(updated_ms, now_ms)
         agent_id = agent_id_by_slug.get(slug)
+        synthetic_task_id = f"runtime-task:{session.get('sessionId') or session_key}"
         synthetic_tasks.append({
-            "id": f"runtime-task:{session.get('sessionId') or session_key}",
+            "id": synthetic_task_id,
             "title": f"Live session · {display_name}",
             "description": f"Runtime-derived activity from {display_name}",
             "status": status,
@@ -327,6 +328,8 @@ def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions:
             "workspace_id": workspace_id,
             "assigned_agent_id": agent_id,
             "source": "runtime",
+            "synthetic": True,
+            "runtime_derived": True,
             "created_at": updated_iso,
             "updated_at": updated_iso,
         })
@@ -334,10 +337,12 @@ def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions:
             "id": f"runtime-event:{session.get('sessionId') or session_key}:{int(updated_ms)}",
             "type": "agent_runtime_activity",
             "agent_id": agent_id,
-            "task_id": f"runtime-task:{session.get('sessionId') or session_key}",
+            "task_id": synthetic_task_id,
             "message": f"{slug} active on {display_name}",
             "metadata": {
                 "source": "runtime",
+                "synthetic": True,
+                "runtime_derived": True,
                 "session_key": session_key,
                 "channel": session.get("channel"),
                 "model": session.get("model"),
@@ -348,6 +353,8 @@ def build_runtime_snapshot(native_store: NativeDashboardStore, runtime_sessions:
             "task_title": f"Live session · {display_name}",
             "workspace_id": workspace_id,
             "source": "runtime",
+            "synthetic": True,
+            "runtime_derived": True,
         })
 
     existing_task_ids = {str(item.get("id") or "") for item in native_tasks}
@@ -680,8 +687,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def _handle_native_events_stream(self, parsed) -> None:
         workspace_id = self._native_workspace_id(parsed)
         subscription = self.native_store.event_bus.subscribe(workspace_id)
-        runtime_signature = ""
         history = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)["events"]
+        runtime_signature = "|".join(
+            str(item.get("id") or "")
+            for item in history[:20]
+            if str(item.get("source") or "") == "runtime"
+        )
 
         self.send_response(200)
         self._add_cors_headers_if_allowed()

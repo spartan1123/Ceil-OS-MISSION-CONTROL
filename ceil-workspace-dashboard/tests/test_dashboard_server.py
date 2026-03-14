@@ -1009,6 +1009,57 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
         self.assertTrue("business_os_seeded" in body or "task_created" in body)
 
+    def test_runtime_snapshot_marks_synthetic_records_and_omits_stale_runtime_tasks(self):
+        store = dashboard_server.NativeDashboardStore(self.native_state_path)
+        now_ms = 1_700_000_000_000
+        original_time = dashboard_server.time.time
+        dashboard_server.time.time = lambda: now_ms / 1000.0
+        self.addCleanup(setattr, dashboard_server.time, "time", original_time)
+
+        snapshot = dashboard_server.build_runtime_snapshot(
+            store,
+            [
+                {
+                    "key": "agent:senku-ishigami:webchat",
+                    "sessionId": "session-fresh",
+                    "displayName": "senku-ishigami",
+                    "channel": "webchat",
+                    "updatedAt": now_ms - (10 * 60 * 1000),
+                    "model": "openai-codex/gpt-5.4",
+                },
+                {
+                    "key": "agent:ariana:webchat",
+                    "sessionId": "session-stale",
+                    "displayName": "ariana",
+                    "channel": "webchat",
+                    "updatedAt": now_ms - (26 * 60 * 60 * 1000),
+                    "model": "openai-codex/gpt-5.4",
+                },
+            ],
+            "default",
+        )
+
+        runtime_tasks = [item for item in snapshot["tasks"] if item.get("source") == "runtime"]
+        runtime_events = [item for item in snapshot["events"] if item.get("source") == "runtime"]
+        runtime_agents = [item for item in snapshot["agents"] if item.get("source") == "runtime"]
+
+        self.assertEqual(len(runtime_tasks), 1)
+        self.assertEqual(runtime_tasks[0]["status"], "in_progress")
+        self.assertTrue(runtime_tasks[0]["synthetic"])
+        self.assertTrue(runtime_tasks[0]["runtime_derived"])
+        self.assertEqual(len(runtime_events), 1)
+        self.assertTrue(runtime_events[0]["synthetic"])
+        self.assertTrue(runtime_events[0]["runtime_derived"])
+        self.assertTrue(runtime_events[0]["metadata"]["synthetic"])
+        self.assertTrue(any(agent.get("synthetic") and agent.get("runtime_derived") for agent in runtime_agents))
+        self.assertFalse(any(item["id"] == "runtime-task:session-stale" for item in runtime_tasks))
+
+    def test_runtime_task_status_never_infers_done(self):
+        now_ms = 1_700_000_000_000
+        self.assertEqual(dashboard_server.runtime_task_status(now_ms - (5 * 60 * 1000), now_ms), "in_progress")
+        self.assertEqual(dashboard_server.runtime_task_status(now_ms - (2 * 60 * 60 * 1000), now_ms), "assigned")
+        self.assertEqual(dashboard_server.runtime_task_status(now_ms - (23 * 60 * 60 * 1000), now_ms), "assigned")
+
     def test_unsupported_mission_control_route_still_proxies_upstream(self):
         server = self.make_dashboard()
         with self.request(
