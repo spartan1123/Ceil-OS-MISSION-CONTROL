@@ -482,6 +482,109 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(os_item["provisioning"]["status"], "completed")
         self.assertEqual(os_item["status"], "Active")
 
+    def test_native_provisioning_projection_ignores_stale_run_updates(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "stale-runs.json")
+        store.create_business_os({"id": "ops-core", "name": "Ops Core", "workspace_id": "ops-core", "business_id": "ops-core"})
+
+        older = store.create_provisioning_run({
+            "id": "prov-old",
+            "business_os_id": "ops-core",
+            "workspace_id": "ops-core",
+            "business_id": "ops-core",
+            "status": "running",
+            "progress": 10,
+            "current_step": "research",
+        })
+        store.update_provisioning_run("prov-old", {"status": "completed", "progress": 100, "current_step": "ready", "completed_at": "2026-03-14T19:49:00Z"})
+        newer = store.create_provisioning_run({
+            "id": "prov-new",
+            "business_os_id": "ops-core",
+            "workspace_id": "ops-core",
+            "business_id": "ops-core",
+            "status": "running",
+            "progress": 55,
+            "current_step": "scaffold",
+        })
+        store.update_provisioning_run("prov-new", {"status": "completed", "progress": 100, "current_step": "ready", "completed_at": "2026-03-14T19:59:00Z"})
+        store.update_provisioning_run("prov-old", {"logs": ["late stale retry"], "progress": 20})
+
+        business = store.get_business_os("ops-core")
+
+        self.assertIsNotNone(business)
+        self.assertEqual(older["id"], "prov-old")
+        self.assertEqual(newer["id"], "prov-new")
+        self.assertEqual(business["provisioning"]["last_run_id"], "prov-new")
+        self.assertEqual(business["provisioning"]["status"], "completed")
+        self.assertEqual(business["provisioning"]["last_completed_at"], "2026-03-14T19:59:00Z")
+        self.assertEqual(business["status"], "Active")
+
+    def test_native_provisioning_run_creation_rejects_overlapping_active_runs(self):
+        server = self.make_dashboard()
+        json.loads(
+            self.request(
+                server,
+                path="/api/business-os",
+                method="POST",
+                payload={"id": "ops-core", "name": "Ops Core", "workspace_id": "ops-core", "business_id": "ops-core"},
+            ).read().decode("utf-8")
+        )
+        self.request(
+            server,
+            path="/api/business-os/provisioning-runs",
+            method="POST",
+            payload={"id": "prov-1", "business_os_id": "ops-core", "workspace_id": "ops-core", "business_id": "ops-core", "status": "running", "progress": 10, "current_step": "research"},
+        ).read()
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request(
+                server,
+                path="/api/business-os/provisioning-runs",
+                method="POST",
+                payload={"id": "prov-2", "business_os_id": "ops-core", "workspace_id": "ops-core", "business_id": "ops-core", "status": "queued", "progress": 0, "current_step": "queued"},
+            )
+
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertIn("Provisioning already active for Business OS", body["error"]["message"])
+
+    def test_native_provisioning_terminal_failure_and_cancellation_project_honestly(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "terminal-runs.json")
+        store.create_business_os({"id": "ops-failed", "name": "Ops Failed", "workspace_id": "ops-failed", "business_id": "ops-failed"})
+        store.create_provisioning_run({"id": "prov-failed", "business_os_id": "ops-failed", "workspace_id": "ops-failed", "business_id": "ops-failed", "status": "running", "progress": 40, "current_step": "scaffold"})
+        store.update_provisioning_run("prov-failed", {"status": "failed", "progress": 40, "current_step": "scaffold"})
+
+        failed_business = store.get_business_os("ops-failed")
+        self.assertIsNotNone(failed_business)
+        self.assertEqual(failed_business["provisioning"]["status"], "failed")
+        self.assertEqual(failed_business["status"], "Failed")
+        self.assertIsNone(failed_business["provisioning"]["current_run_id"])
+
+        store.create_business_os({"id": "ops-cancelled", "name": "Ops Cancelled", "workspace_id": "ops-cancelled", "business_id": "ops-cancelled"})
+        store.create_provisioning_run({"id": "prov-cancelled", "business_os_id": "ops-cancelled", "workspace_id": "ops-cancelled", "business_id": "ops-cancelled", "status": "running", "progress": 65, "current_step": "handoff"})
+        store.update_provisioning_run("prov-cancelled", {"status": "cancelled", "progress": 65, "current_step": "handoff"})
+
+        cancelled_business = store.get_business_os("ops-cancelled")
+        self.assertIsNotNone(cancelled_business)
+        self.assertEqual(cancelled_business["provisioning"]["status"], "cancelled")
+        self.assertEqual(cancelled_business["status"], "Cancelled")
+        self.assertIsNone(cancelled_business["provisioning"]["current_run_id"])
+
+    def test_native_provisioning_last_completed_at_persists_after_failed_followup(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "last-completed-at.json")
+        store.create_business_os({"id": "ops-core", "name": "Ops Core", "workspace_id": "ops-core", "business_id": "ops-core"})
+        store.create_provisioning_run({"id": "prov-1", "business_os_id": "ops-core", "workspace_id": "ops-core", "business_id": "ops-core", "status": "running", "progress": 20, "current_step": "research"})
+        store.update_provisioning_run("prov-1", {"status": "completed", "progress": 100, "current_step": "ready", "completed_at": "2026-03-14T20:10:00Z"})
+        store.create_provisioning_run({"id": "prov-2", "business_os_id": "ops-core", "workspace_id": "ops-core", "business_id": "ops-core", "status": "running", "progress": 5, "current_step": "research"})
+        store.update_provisioning_run("prov-2", {"status": "failed", "progress": 5, "current_step": "research"})
+
+        business = store.get_business_os("ops-core")
+
+        self.assertIsNotNone(business)
+        self.assertEqual(business["provisioning"]["status"], "failed")
+        self.assertEqual(business["status"], "Failed")
+        self.assertEqual(business["provisioning"]["last_run_id"], "prov-2")
+        self.assertEqual(business["provisioning"]["last_completed_at"], "2026-03-14T20:10:00Z")
+
     def test_proxy_forwards_with_same_origin_fallback_and_main_token(self):
         server = self.make_dashboard()
         with self.request(

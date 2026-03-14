@@ -262,25 +262,70 @@ class NativeDashboardStore:
     def _find_provisioning_run_locked(self, run_id: str) -> dict[str, Any] | None:
         return next((item for item in self._state["provisioning_runs"] if str(item.get("id") or "") == run_id), None)
 
+    @staticmethod
+    def _is_terminal_provisioning_status(status: Any) -> bool:
+        return str(status or "").strip() in {"completed", "failed", "cancelled"}
+
+    @staticmethod
+    def _provisioning_sort_key(run: dict[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(run.get("completed_at") or ""),
+            str(run.get("updated_at") or ""),
+            str(run.get("id") or ""),
+        )
+
+    def _business_os_runs_locked(self, business_os_id: str) -> list[dict[str, Any]]:
+        return [item for item in self._state["provisioning_runs"] if str(item.get("business_os_id") or "") == business_os_id]
+
+    def _select_authoritative_provisioning_run_locked(self, business_os_id: str) -> dict[str, Any] | None:
+        active_candidate: dict[str, Any] | None = None
+        latest_candidate: dict[str, Any] | None = None
+        for item in self._state["provisioning_runs"]:
+            if str(item.get("business_os_id") or "") != business_os_id:
+                continue
+            if latest_candidate is None:
+                latest_candidate = item
+            if active_candidate is None and not self._is_terminal_provisioning_status(item.get("status")):
+                active_candidate = item
+        return active_candidate or latest_candidate
+
+    def _last_completed_at_locked(self, business_os_id: str) -> str | None:
+        completed_runs = [
+            item for item in self._business_os_runs_locked(business_os_id)
+            if str(item.get("status") or "").strip() == "completed" and item.get("completed_at")
+        ]
+        if not completed_runs:
+            return None
+        return max(completed_runs, key=self._provisioning_sort_key).get("completed_at")
+
     def _sync_business_os_provisioning_locked(self, business: dict[str, Any], run: dict[str, Any]) -> None:
-        business["template"] = run["template_selection"]["template_id"]
+        authoritative_run = self._select_authoritative_provisioning_run_locked(str(business.get("id") or ""))
+        if authoritative_run is None:
+            return
+        last_completed_at = self._last_completed_at_locked(str(business.get("id") or ""))
+        business["template"] = authoritative_run["template_selection"]["template_id"]
         business.setdefault("template_selection", {})
-        business["template_selection"] = copy.deepcopy(run["template_selection"])
+        business["template_selection"] = copy.deepcopy(authoritative_run["template_selection"])
         business.setdefault("provisioning", {})
         business["provisioning"].update({
-            "status": run["status"],
-            "current_run_id": None if run["status"] in {"completed", "failed", "cancelled"} else run["id"],
-            "last_run_id": run["id"],
-            "last_completed_at": run.get("completed_at") if run["status"] == "completed" else business["provisioning"].get("last_completed_at"),
-            "last_event_at": run["updated_at"],
-            "progress": run["progress"],
-            "step": run["current_step"],
-            "template_id": run["template_selection"]["template_id"],
-            "deep_research_required": run["deep_research"]["required"],
-            "deep_research_status": run["deep_research"]["status"],
+            "status": authoritative_run["status"],
+            "current_run_id": None if self._is_terminal_provisioning_status(authoritative_run["status"]) else authoritative_run["id"],
+            "last_run_id": authoritative_run["id"],
+            "last_completed_at": last_completed_at,
+            "last_event_at": authoritative_run["updated_at"],
+            "progress": authoritative_run["progress"],
+            "step": authoritative_run["current_step"],
+            "template_id": authoritative_run["template_selection"]["template_id"],
+            "deep_research_required": authoritative_run["deep_research"]["required"],
+            "deep_research_status": authoritative_run["deep_research"]["status"],
         })
-        business["status"] = "Active" if run["status"] == "completed" else "Provisioning"
-        business["updated_at"] = run["updated_at"]
+        status = str(authoritative_run.get("status") or "").strip()
+        business["status"] = {
+            "completed": "Active",
+            "failed": "Failed",
+            "cancelled": "Cancelled",
+        }.get(status, "Provisioning")
+        business["updated_at"] = authoritative_run["updated_at"]
 
     def list_business_os(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -426,6 +471,17 @@ class NativeDashboardStore:
                 raise ValueError(f"Unknown Business OS: {business_os_id}")
             if any(str(item.get("id") or "") == run["id"] for item in self._state["provisioning_runs"]):
                 raise ValueError(f"Provisioning run already exists: {run['id']}")
+            active_run = next(
+                (
+                    item for item in self._business_os_runs_locked(business_os_id)
+                    if not self._is_terminal_provisioning_status(item.get("status"))
+                ),
+                None,
+            )
+            if active_run is not None:
+                raise ValueError(
+                    f"Provisioning already active for Business OS: {business_os_id} (run {active_run['id']})"
+                )
             previous = self._snapshot()
             self._state["provisioning_runs"].insert(0, run)
             self._sync_business_os_provisioning_locked(business, run)
