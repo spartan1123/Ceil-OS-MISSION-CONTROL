@@ -2,7 +2,7 @@
 
 ## Conclusion
 
-The live CL dashboard shell in this repo (`ceil-workspace-dashboard`) does **not** implement external actor attribution itself.
+The CL dashboard shell implemented in this repo (`ceil-workspace-dashboard`) does **not** implement external actor attribution itself.
 That logic currently lives behind the Mission Control proxy target, which defaults to the Autensa backend.
 
 ## Evidence in the owned CL dashboard repo
@@ -14,7 +14,7 @@ That logic currently lives behind the Mission Control proxy target, which defaul
 - `do_GET()` forwards `/api/mission-control/*` via `_proxy_mission_control_request(...)`
 - `do_POST()` forwards `/api/mission-control/*` via `_proxy_mission_control_request(...)`
 
-That means the user-facing CL dashboard stack serves the owned shell here, but its Mission Control API behavior is delegated to the backend configured at `127.0.0.1:4000`.
+That means this repo contains the user-facing CL dashboard shell, but its Mission Control API behavior is delegated to the backend configured at `127.0.0.1:4000`.
 
 ## Evidence in the backend wired behind that proxy boundary
 
