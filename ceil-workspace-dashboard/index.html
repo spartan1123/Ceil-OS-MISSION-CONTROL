@@ -1938,6 +1938,7 @@
         getStatusBadge,
         startOfTodayISO,
         isHousekeepingTask,
+        getCompletedLikeStatusOrClause,
         isCompletedLikeStatus,
         isCountableTask,
         startOfWeekISO,
@@ -2129,7 +2130,7 @@
               .from("agent_logs")
               .select("*", { count: "exact", head: true })
               .gte("created_at", weekISO)
-              .ilike("status", "%completed%"),
+              .or(getCompletedLikeStatusOrClause("status")),
             supabaseClient
               .from("agent_logs")
               .select("agent_name, task_description, model_used, status, created_at")
@@ -2511,7 +2512,7 @@
               .limit(5000),
             supabaseClient.from("agent_logs").select("agent_name, model_used, status, created_at").order("created_at", { ascending: false }).limit(1500),
             supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO),
-            supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO).ilike("status", "%completed%"),
+            supabaseClient.from("agent_logs").select("*", { count: "exact", head: true }).gte("created_at", weekISO).or(getCompletedLikeStatusOrClause("status")),
           ]);
 
           if (todayRes.error) throw todayRes.error;
@@ -5492,7 +5493,7 @@
               .from("agent_logs")
               .select("*", { count: "exact", head: true })
               .gte("created_at", weekStart)
-              .ilike("status", "%completed%"),
+              .or(getCompletedLikeStatusOrClause("status")),
             supabaseClient
               .from("agent_logs")
               .select("*", { count: "exact", head: true })
@@ -5518,7 +5519,7 @@
           const pulseCounts = dayStarts.map((start, idx) => {
             const end = idx < 6 ? dayStarts[idx + 1] : new Date(start).getTime() + 86400000;
             return logs7day.filter(l =>
-              l.status?.toLowerCase().includes("completed") &&
+              isCompletedLikeStatus(l.status) &&
               new Date(l.created_at) >= new Date(start) &&
               new Date(l.created_at) < new Date(end)
             ).length;
@@ -5528,13 +5529,13 @@
           const yesterdayPulseCount = pulseCounts[5];
 
           // Done tasks today (completed in agent_logs)
-          const doneToday     = logsToday.filter(l => l.status?.toLowerCase().includes("completed")).length;
+          const doneToday     = logsToday.filter(l => isCompletedLikeStatus(l.status)).length;
           // Done yesterday
           const yesterdayLogs = logs7day.filter(l => {
             const t = new Date(l.created_at);
             return t >= new Date(dayStarts[5]) && t < new Date(dayStarts[6]);
           });
-          const doneYesterday = yesterdayLogs.filter(l => l.status?.toLowerCase().includes("completed")).length;
+          const doneYesterday = yesterdayLogs.filter(l => isCompletedLikeStatus(l.status)).length;
 
           // Agents active today (distinct agent names)
           const agentsToday = new Set(logsToday.map(l => l.agent_name?.toLowerCase().trim()).filter(Boolean));
@@ -5553,7 +5554,7 @@
 
           // Recent completions
           const recentCompletions = logsToday
-            .filter(l => l.status?.toLowerCase().includes("completed"))
+            .filter(l => isCompletedLikeStatus(l.status))
             .slice(0, 6);
 
           renderQuickStats({

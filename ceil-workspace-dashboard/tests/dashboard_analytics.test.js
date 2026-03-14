@@ -165,3 +165,31 @@ test('buildOrgChartStats keeps housekeeping out of totals and leaves zero-task a
   assert.equal(senku.latest.model_used, 'gpt-heartbeat');
   assert.equal(manager.latest.model_used, 'gpt-manage');
 });
+
+
+test('completion-like statuses stay countable across analytics rollups', () => {
+  const summary = analytics.summarizeAgentLogsForAgents({
+    agents: AGENTS,
+    latestEntries: [],
+    todayEntries: [
+      { agent_name: 'senku-ishigami', task_description: 'Ship PASS fix', status: 'PASS', created_at: '2026-03-08T08:00:00Z' },
+      { agent_name: 'workspace-manager', task_description: 'Wrap rollout', status: 'done', created_at: '2026-03-08T09:00:00Z' },
+      { agent_name: 'security-compliance', task_description: 'Close review', status: 'resolved', created_at: '2026-03-08T10:00:00Z' },
+      { agent_name: 'senku-ishigami', task_description: 'Ship follow-up', status: 'completed', created_at: '2026-03-08T11:00:00Z' },
+    ],
+    todayTotalRows: 4,
+    weekTotalCount: 6,
+    weekSuccessCount: 4,
+    resolveAgentFromLogName: resolver.resolveAgentFromLogName,
+    isCountableTask: utils.isCountableTask,
+    isHousekeepingTask: utils.isHousekeepingTask,
+    normalizeAgentName: utils.normalizeAgentName,
+  });
+
+  assert.equal(summary.totalToday, 4);
+  assert.equal(summary.successRate, '66.7%');
+  assert.equal(summary.mostActive, 'Senku Ishigami (2)');
+  assert.equal(summary.agentSummaries.find((agent) => agent.name === 'Senku Ishigami').tasksToday, 2);
+  assert.equal(summary.agentSummaries.find((agent) => agent.name === 'Workspace Manager').tasksToday, 1);
+  assert.equal(summary.agentSummaries.find((agent) => agent.name === 'Security & Compliance').tasksToday, 1);
+});

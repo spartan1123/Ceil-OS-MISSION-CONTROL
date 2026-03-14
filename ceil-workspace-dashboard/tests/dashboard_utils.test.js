@@ -90,14 +90,28 @@ test('startOfTodayISO and startOfWeekISO reset to local day/week boundaries', ()
 test('housekeeping and completion helpers classify tasks correctly', () => {
   assert.equal(utils.isHousekeepingTask({ task_description: 'Heartbeat check' }), true);
   assert.equal(utils.isCompletedLikeStatus('resolved'), true);
+  assert.equal(utils.isCompletedLikeStatus('PASS'), true);
   assert.equal(utils.isCompletedLikeStatus('running'), false);
   assert.equal(
     utils.isCountableTask({ task_description: 'Build dashboard widgets', status: 'completed' }),
     true,
   );
   assert.equal(
+    utils.isCountableTask({ task_description: 'Build dashboard widgets', status: 'done' }),
+    true,
+  );
+  assert.equal(
     utils.isCountableTask({ task_description: 'Supabase logging smoke test', status: 'completed' }),
     false,
+  );
+});
+
+
+test('completion query clause covers shared completion-like status tokens', () => {
+  assert.deepEqual(utils.getCompletedLikeStatusTokens(), ['complete', 'success', 'done', 'resolved', 'pass']);
+  assert.equal(
+    utils.getCompletedLikeStatusOrClause('status'),
+    'status.ilike.%complete%,status.ilike.%success%,status.ilike.%done%,status.ilike.%resolved%,status.ilike.%pass%',
   );
 });
 

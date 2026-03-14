@@ -156,15 +156,28 @@
     ].some((needle) => task.includes(needle));
   }
 
+  const COMPLETED_LIKE_STATUS_TOKENS = Object.freeze([
+    "complete",
+    "success",
+    "done",
+    "resolved",
+    "pass",
+  ]);
+
+  function getCompletedLikeStatusTokens() {
+    return [...COMPLETED_LIKE_STATUS_TOKENS];
+  }
+
+  function getCompletedLikeStatusOrClause(column = "status") {
+    return COMPLETED_LIKE_STATUS_TOKENS
+      .map((token) => `${column}.ilike.%${token}%`)
+      .join(",");
+  }
+
   function isCompletedLikeStatus(status) {
     const value = normalizeAgentName(status || "");
     if (!value) return false;
-    return (
-      value.includes("complete") ||
-      value.includes("success") ||
-      value.includes("done") ||
-      value.includes("resolved")
-    );
+    return COMPLETED_LIKE_STATUS_TOKENS.some((token) => value.includes(token));
   }
 
   function isCountableTask(entry) {
@@ -193,6 +206,8 @@
     getStatusBadge,
     startOfTodayISO,
     isHousekeepingTask,
+    getCompletedLikeStatusTokens,
+    getCompletedLikeStatusOrClause,
     isCompletedLikeStatus,
     isCountableTask,
     startOfWeekISO,
