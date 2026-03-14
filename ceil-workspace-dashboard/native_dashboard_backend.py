@@ -267,10 +267,40 @@ class NativeDashboardStore:
         return str(status or "").strip() in {"completed", "failed", "cancelled"}
 
     @staticmethod
-    def _provisioning_sort_key(run: dict[str, Any]) -> tuple[str, str, str]:
+    def _provisioning_sort_key(run: dict[str, Any]) -> tuple[str, str, str, str]:
         return (
             str(run.get("completed_at") or ""),
             str(run.get("updated_at") or ""),
+            str(run.get("created_at") or ""),
+            str(run.get("id") or ""),
+        )
+
+    @classmethod
+    def _provisioning_authority_sort_key(cls, run: dict[str, Any]) -> tuple[str, str, str, str]:
+        """Deterministic recency key for dashboard projection authority.
+
+        Non-terminal runs win by newest run recency (`started_at`/`created_at`),
+        with `updated_at` breaking ties. If every run is terminal, the newest run
+        still wins by creation recency, with terminal event timestamps as
+        tie-breakers. The run id breaks ties so selection never depends on list
+        order.
+        """
+        created_at = str(run.get("created_at") or "")
+        updated_at = str(run.get("updated_at") or "")
+        if cls._is_terminal_provisioning_status(run.get("status")):
+            primary_timestamp = created_at
+            terminal_status = str(run.get("status") or "").strip()
+            if terminal_status == "completed":
+                secondary_timestamp = f"0:{str(run.get('completed_at') or updated_at or created_at)}"
+            else:
+                secondary_timestamp = f"1:{updated_at or created_at}"
+        else:
+            primary_timestamp = str(run.get("started_at") or created_at)
+            secondary_timestamp = updated_at or created_at
+        return (
+            primary_timestamp,
+            secondary_timestamp,
+            updated_at,
             str(run.get("id") or ""),
         )
 
@@ -278,16 +308,12 @@ class NativeDashboardStore:
         return [item for item in self._state["provisioning_runs"] if str(item.get("business_os_id") or "") == business_os_id]
 
     def _select_authoritative_provisioning_run_locked(self, business_os_id: str) -> dict[str, Any] | None:
-        active_candidate: dict[str, Any] | None = None
-        latest_candidate: dict[str, Any] | None = None
-        for item in self._state["provisioning_runs"]:
-            if str(item.get("business_os_id") or "") != business_os_id:
-                continue
-            if latest_candidate is None:
-                latest_candidate = item
-            if active_candidate is None and not self._is_terminal_provisioning_status(item.get("status")):
-                active_candidate = item
-        return active_candidate or latest_candidate
+        runs = self._business_os_runs_locked(business_os_id)
+        if not runs:
+            return None
+        active_runs = [item for item in runs if not self._is_terminal_provisioning_status(item.get("status"))]
+        candidates = active_runs or runs
+        return max(candidates, key=self._provisioning_authority_sort_key)
 
     def _last_completed_at_locked(self, business_os_id: str) -> str | None:
         completed_runs = [

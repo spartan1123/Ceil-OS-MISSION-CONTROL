@@ -585,6 +585,108 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(business["provisioning"]["last_run_id"], "prov-2")
         self.assertEqual(business["provisioning"]["last_completed_at"], "2026-03-14T20:10:00Z")
 
+    def test_native_provisioning_authority_selection_ignores_run_list_order(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "authority-order.json")
+        store.create_business_os({"id": "ops-core", "name": "Ops Core", "workspace_id": "ops-core", "business_id": "ops-core"})
+
+        with store._lock:
+            business = store._find_business_os_locked("ops-core")
+            self.assertIsNotNone(business)
+            assert business is not None
+            older_active = store._normalize_provisioning_run({
+                "id": "prov-active-older",
+                "business_os_id": "ops-core",
+                "workspace_id": "ops-core",
+                "business_id": "ops-core",
+                "status": "running",
+                "progress": 15,
+                "current_step": "research",
+                "started_at": "2026-03-14T20:00:00Z",
+                "created_at": "2026-03-14T20:00:00Z",
+                "updated_at": "2026-03-14T20:05:00Z",
+            })
+            latest_terminal = store._normalize_provisioning_run({
+                "id": "prov-terminal-latest",
+                "business_os_id": "ops-core",
+                "workspace_id": "ops-core",
+                "business_id": "ops-core",
+                "status": "completed",
+                "progress": 100,
+                "current_step": "ready",
+                "completed_at": "2026-03-14T20:12:00Z",
+                "created_at": "2026-03-14T20:01:00Z",
+                "updated_at": "2026-03-14T20:12:00Z",
+            })
+            newer_active = store._normalize_provisioning_run({
+                "id": "prov-active-newer",
+                "business_os_id": "ops-core",
+                "workspace_id": "ops-core",
+                "business_id": "ops-core",
+                "status": "running",
+                "progress": 80,
+                "current_step": "handoff",
+                "started_at": "2026-03-14T20:02:00Z",
+                "created_at": "2026-03-14T20:02:00Z",
+                "updated_at": "2026-03-14T20:10:00Z",
+            })
+            store._state["provisioning_runs"] = [older_active, latest_terminal, newer_active]
+            store._sync_business_os_provisioning_locked(business, older_active)
+            store._persist_locked()
+
+        business = store.get_business_os("ops-core")
+
+        self.assertIsNotNone(business)
+        self.assertEqual(business["provisioning"]["current_run_id"], "prov-active-newer")
+        self.assertEqual(business["provisioning"]["last_run_id"], "prov-active-newer")
+        self.assertEqual(business["provisioning"]["status"], "running")
+        self.assertEqual(business["provisioning"]["progress"], 80)
+        self.assertEqual(business["provisioning"]["last_completed_at"], "2026-03-14T20:12:00Z")
+
+    def test_native_provisioning_authority_prefers_newest_active_run_in_legacy_multi_active_state(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "legacy-multi-active.json")
+        store.create_business_os({"id": "ops-core", "name": "Ops Core", "workspace_id": "ops-core", "business_id": "ops-core"})
+
+        with store._lock:
+            business = store._find_business_os_locked("ops-core")
+            self.assertIsNotNone(business)
+            assert business is not None
+            stale_active = store._normalize_provisioning_run({
+                "id": "prov-active-stale",
+                "business_os_id": "ops-core",
+                "workspace_id": "ops-core",
+                "business_id": "ops-core",
+                "status": "running",
+                "progress": 10,
+                "current_step": "research",
+                "started_at": "2026-03-14T19:50:00Z",
+                "created_at": "2026-03-14T19:50:00Z",
+                "updated_at": "2026-03-14T19:55:00Z",
+            })
+            authoritative_active = store._normalize_provisioning_run({
+                "id": "prov-active-authoritative",
+                "business_os_id": "ops-core",
+                "workspace_id": "ops-core",
+                "business_id": "ops-core",
+                "status": "queued",
+                "progress": 60,
+                "current_step": "scaffold",
+                "started_at": "2026-03-14T20:00:00Z",
+                "created_at": "2026-03-14T20:00:00Z",
+                "updated_at": "2026-03-14T20:08:00Z",
+            })
+            store._state["provisioning_runs"] = [authoritative_active, stale_active]
+            store._sync_business_os_provisioning_locked(business, stale_active)
+            store._persist_locked()
+
+        business = store.get_business_os("ops-core")
+
+        self.assertIsNotNone(business)
+        self.assertEqual(business["provisioning"]["current_run_id"], "prov-active-authoritative")
+        self.assertEqual(business["provisioning"]["last_run_id"], "prov-active-authoritative")
+        self.assertEqual(business["provisioning"]["step"], "scaffold")
+        self.assertEqual(business["provisioning"]["progress"], 60)
+        self.assertEqual(business["status"], "Provisioning")
+
     def test_proxy_forwards_with_same_origin_fallback_and_main_token(self):
         server = self.make_dashboard()
         with self.request(
