@@ -50,6 +50,120 @@ DEFAULT_BUSINESS_OS = {
 }
 
 
+EXTERNAL_ACTOR_ALIASES: dict[str, list[str]] = {
+    "workspace-orchestrator": ["ceil", "orchestrator", "workspace manager", "workspace-manager", "main-orchestrator"],
+    "main-orchestrator": ["workspace-orchestrator", "ceil", "orchestrator", "workspace manager", "workspace-manager"],
+    "ceil": ["workspace-orchestrator", "main-orchestrator", "orchestrator", "workspace-manager"],
+    "senku-ishigami": ["senku ishigami", "senku", "provisioning architect", "provisioning-architect"],
+    "provisioning-architect": ["senku-ishigami", "senku ishigami", "senku"],
+    "quality-auditor": ["quality auditor"],
+}
+
+
+def normalize_external_actor(value: Any) -> str:
+    raw = str(value or "").lower()
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in raw).split())
+
+
+def token_set(value: Any) -> set[str]:
+    normalized = normalize_external_actor(value)
+    return {item for item in normalized.split(" ") if item}
+
+
+def score_external_actor_match(actor: str, agent: dict[str, Any]) -> int:
+    actor_norm = normalize_external_actor(actor)
+    if not actor_norm:
+        return 0
+    gateway_norm = normalize_external_actor(agent.get("gateway_agent_id"))
+    name_norm = normalize_external_actor(agent.get("name"))
+    role_norm = normalize_external_actor(agent.get("role"))
+    if gateway_norm and gateway_norm == actor_norm:
+        return 100
+    if name_norm == actor_norm:
+        return 95
+    if name_norm and (name_norm in actor_norm or actor_norm in name_norm):
+        return 80
+    aliases = EXTERNAL_ACTOR_ALIASES.get(actor_norm, [])
+    alias_norms = {normalize_external_actor(item) for item in aliases}
+    if any(candidate and candidate in alias_norms for candidate in (gateway_norm, name_norm, role_norm)):
+        return 70
+    actor_tokens = token_set(actor_norm)
+    if actor_tokens:
+        name_tokens = token_set(agent.get("name"))
+        role_tokens = token_set(agent.get("role"))
+        overlap = sum(1 for token in actor_tokens if token in name_tokens or token in role_tokens)
+        if overlap == len(actor_tokens):
+            return 60
+    if "orchestrator" in actor_norm and bool(agent.get("is_master")):
+        return 50
+    return 0
+
+
+def map_external_status(status: Any, source: Any, actor: Any, message: Any) -> dict[str, str]:
+    normalized = str(status or "").strip().lower()
+    source_name = str(source or "external source").strip() or "external source"
+    actor_name = str(actor or source_name).strip() or source_name
+    message_text = str(message or "").strip()
+    if normalized in {"completed", "complete", "done", "succeeded", "success"}:
+        task_status = "done"
+        activity_type = "external_progress_completed"
+        event_type = "task_updated"
+    elif normalized in {"failed", "error"}:
+        task_status = "blocked"
+        activity_type = "external_progress_failed"
+        event_type = "task_updated"
+    elif normalized in {"blocked", "waiting", "paused"}:
+        task_status = "blocked"
+        activity_type = "external_progress_blocked"
+        event_type = "task_updated"
+    elif normalized in {"started", "assigned", "queued"}:
+        task_status = "assigned"
+        activity_type = "external_progress_started"
+        event_type = "task_created"
+    else:
+        task_status = "in_progress"
+        activity_type = "external_progress_updated"
+        event_type = "task_updated"
+    reason = f"{normalized.title() or 'Updated'} via {source_name}"
+    if actor_name:
+        reason += f" ({actor_name})"
+    if message_text:
+        reason += f": {message_text}"
+    return {"task_status": task_status, "activity_type": activity_type, "event_type": event_type, "status_reason": reason}
+
+
+def build_external_task_title(payload: dict[str, Any]) -> str:
+    explicit = str(payload.get("title") or "").strip()
+    if explicit:
+        return explicit
+    actor = str(payload.get("actor") or payload.get("source") or "External worker").strip() or "External worker"
+    status = str(payload.get("status") or "update").strip() or "update"
+    return f"External work: {actor} ({status})"
+
+
+def build_external_activity_message(payload: dict[str, Any]) -> str:
+    actor = str(payload.get("actor") or payload.get("source") or "External worker").strip() or "External worker"
+    status = str(payload.get("status") or "updated").strip() or "updated"
+    details = str(payload.get("message") or payload.get("description") or "").strip()
+    message = f"{actor} reported {status}"
+    if details:
+        message += f": {details}"
+    return message
+
+
+def build_external_event_key(payload: dict[str, Any]) -> str:
+    parts = [
+        str(payload.get("source") or "").strip(),
+        str(payload.get("external_run_id") or "").strip(),
+        str(payload.get("external_event_id") or "").strip(),
+        str(payload.get("occurred_at") or "").strip(),
+        str(payload.get("status") or "").strip(),
+        str(payload.get("message") or "").strip(),
+        str(payload.get("external_task_ref") or "").strip(),
+    ]
+    return "|".join(parts)
+
+
 @dataclass
 class NativeSubscription:
     queue: queue.Queue
@@ -100,6 +214,7 @@ class NativeDashboardStore:
             "provisioning_runs": [],
             "tasks": [],
             "agents": [],
+            "external_task_syncs": [],
             "events": [
                 {
                     "id": f"evt-{uuid.uuid4().hex[:10]}",
@@ -142,10 +257,12 @@ class NativeDashboardStore:
             "provisioning_runs": list(payload.get("provisioning_runs") or []),
             "tasks": list(payload.get("tasks") or []),
             "agents": list(payload.get("agents") or []),
+            "external_task_syncs": list(payload.get("external_task_syncs") or []),
             "events": list(payload.get("events") or []),
         }
         state["business_os"] = [self._normalize_business_os_record(item) for item in state["business_os"] if isinstance(item, dict)]
         state["provisioning_runs"] = [self._normalize_provisioning_run(item) for item in state["provisioning_runs"] if isinstance(item, dict)]
+        state["external_task_syncs"] = [self._normalize_external_task_sync(item) for item in state["external_task_syncs"] if isinstance(item, dict)]
         if not any(str(item.get("id") or "") == "default" for item in state["business_os"]):
             created_at = now_iso()
             state["business_os"].insert(0, self._normalize_business_os_record(dict(DEFAULT_BUSINESS_OS, created_at=created_at, updated_at=created_at)))
@@ -252,6 +369,25 @@ class NativeDashboardStore:
             "logs": logs[-120:],
             "started_at": item.get("started_at") or created_at,
             "completed_at": item.get("completed_at"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+
+    def _normalize_external_task_sync(self, item: dict[str, Any]) -> dict[str, Any]:
+        created_at = str(item.get("created_at") or now_iso())
+        updated_at = str(item.get("updated_at") or created_at)
+        return {
+            "id": str(item.get("id") or f"sync-{uuid.uuid4().hex[:10]}"),
+            "source": str(item.get("source") or "external").strip() or "external",
+            "external_run_id": str(item.get("external_run_id") or "").strip(),
+            "task_id": str(item.get("task_id") or "").strip(),
+            "workspace_id": str(item.get("workspace_id") or "default").strip() or "default",
+            "business_id": str(item.get("business_id") or item.get("workspace_id") or "default").strip() or "default",
+            "external_task_ref": str(item.get("external_task_ref") or "").strip() or None,
+            "actor": str(item.get("actor") or "").strip() or None,
+            "last_event_key": str(item.get("last_event_key") or "").strip() or None,
+            "last_status": str(item.get("last_status") or "").strip() or None,
+            "metadata": copy.deepcopy(item.get("metadata") or {}),
             "created_at": created_at,
             "updated_at": updated_at,
         }
@@ -574,6 +710,155 @@ class NativeDashboardStore:
         if event:
             self.event_bus.publish(event)
         return updated
+
+    def _find_external_task_sync_locked(self, source: str, external_run_id: str) -> dict[str, Any] | None:
+        return next((
+            item for item in self._state["external_task_syncs"]
+            if str(item.get("source") or "") == source and str(item.get("external_run_id") or "") == external_run_id
+        ), None)
+
+    def resolve_external_actor_agent_id(self, actor: Any, workspace_id: str = "default") -> str | None:
+        actor_norm = normalize_external_actor(actor)
+        if not actor_norm:
+            return None
+        with self._lock:
+            agents = [copy.deepcopy(item) for item in self._state["agents"] if str(item.get("workspace_id") or "default") == workspace_id]
+        best_match: dict[str, Any] | None = None
+        ambiguous = False
+        for agent in agents:
+            score = score_external_actor_match(actor_norm, agent)
+            if score <= 0:
+                continue
+            if best_match is None or score > int(best_match["score"]):
+                best_match = {"id": str(agent.get("id") or ""), "score": score}
+                ambiguous = False
+                continue
+            if score == int(best_match["score"]) and str(agent.get("id") or "") != str(best_match["id"]):
+                ambiguous = True
+        if not best_match or ambiguous:
+            return None
+        return str(best_match["id"])
+
+    def ingest_external_task_progress(self, payload: dict[str, Any]) -> dict[str, Any]:
+        source = str(payload.get("source") or "").strip()
+        external_run_id = str(payload.get("external_run_id") or "").strip()
+        if not source:
+            raise ValueError("source is required")
+        if not external_run_id:
+            raise ValueError("external_run_id is required")
+        workspace_id = str(payload.get("workspace_id") or "default").strip() or "default"
+        business_id = str(payload.get("business_id") or workspace_id).strip() or workspace_id
+        now = str(payload.get("occurred_at") or now_iso()).strip() or now_iso()
+        event_key = build_external_event_key(payload)
+        mapping = map_external_status(payload.get("status"), source, payload.get("actor"), payload.get("message"))
+        actor_agent_id = self.resolve_external_actor_agent_id(payload.get("actor"), workspace_id)
+        task_title = build_external_task_title(payload)
+        activity_message = build_external_activity_message(payload)
+        metadata = {
+            **copy.deepcopy(payload.get("metadata") or {}),
+            "source": source,
+            "actor": str(payload.get("actor") or "").strip() or None,
+            "external_run_id": external_run_id,
+            "external_task_ref": str(payload.get("external_task_ref") or "").strip() or None,
+            "external_event_id": str(payload.get("external_event_id") or "").strip() or None,
+            "occurred_at": now,
+            "external_status": str(payload.get("status") or "").strip() or None,
+            "status_reason": mapping["status_reason"],
+        }
+        published_events: list[dict[str, Any]] = []
+        with self._lock:
+            existing_sync = self._find_external_task_sync_locked(source, external_run_id)
+            if existing_sync and str(existing_sync.get("last_event_key") or "") == event_key:
+                task = next((copy.deepcopy(item) for item in self._state["tasks"] if str(item.get("id") or "") == str(existing_sync.get("task_id") or "")), None)
+                return {
+                    "task": self._enrich_task(task),
+                    "created": False,
+                    "idempotent": True,
+                    "workspace_id": str(existing_sync.get("workspace_id") or workspace_id),
+                }
+            previous = self._snapshot()
+            created = existing_sync is None
+            task_id = str(existing_sync.get("task_id") or "") if existing_sync else f"task-{uuid.uuid4().hex[:10]}"
+            sync_id = str(existing_sync.get("id") or "") if existing_sync else f"sync-{uuid.uuid4().hex[:10]}"
+            task = next((item for item in self._state["tasks"] if str(item.get("id") or "") == task_id), None)
+            if created:
+                task = {
+                    "id": task_id,
+                    "title": task_title,
+                    "description": str(payload.get("description") or "").strip() or None,
+                    "priority": "normal",
+                    "status": mapping["task_status"],
+                    "task_type": "general",
+                    "assigned_agent_id": actor_agent_id,
+                    "due_date": None,
+                    "workspace_id": workspace_id,
+                    "business_id": business_id,
+                    "status_reason": mapping["status_reason"],
+                    "external_source": source,
+                    "external_actor": str(payload.get("actor") or "").strip() or None,
+                    "external_run_id": external_run_id,
+                    "external_task_ref": str(payload.get("external_task_ref") or "").strip() or None,
+                    "external_metadata": copy.deepcopy(metadata),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                self._state["tasks"].insert(0, task)
+            else:
+                if task is None:
+                    raise ValueError("Task not found for existing external sync")
+                if str(payload.get("title") or "").strip():
+                    task["title"] = task_title
+                if "description" in payload:
+                    task["description"] = str(payload.get("description") or "").strip() or None
+                task["status"] = mapping["task_status"]
+                task["status_reason"] = mapping["status_reason"]
+                if actor_agent_id is not None:
+                    task["assigned_agent_id"] = actor_agent_id
+                task["external_source"] = source
+                task["external_actor"] = str(payload.get("actor") or "").strip() or None
+                task["external_run_id"] = external_run_id
+                task["external_task_ref"] = str(payload.get("external_task_ref") or "").strip() or None
+                task["external_metadata"] = copy.deepcopy(metadata)
+                task["updated_at"] = now
+            event = self._append_event_locked({
+                "type": "task_created" if created else mapping["event_type"],
+                "workspace_id": workspace_id,
+                "business_id": business_id,
+                "task_id": task_id,
+                "agent_id": actor_agent_id,
+                "message": activity_message,
+                "created_at": now,
+            })
+            published_events.append(event)
+            sync_payload = self._normalize_external_task_sync({
+                "id": sync_id,
+                "source": source,
+                "external_run_id": external_run_id,
+                "task_id": task_id,
+                "workspace_id": workspace_id,
+                "business_id": business_id,
+                "external_task_ref": payload.get("external_task_ref"),
+                "actor": payload.get("actor"),
+                "last_event_key": event_key,
+                "last_status": payload.get("status"),
+                "metadata": metadata,
+                "created_at": existing_sync.get("created_at") if existing_sync else now,
+                "updated_at": now,
+            })
+            if created:
+                self._state["external_task_syncs"].insert(0, sync_payload)
+            else:
+                existing_sync.clear()
+                existing_sync.update(sync_payload)
+            try:
+                self._persist_locked()
+            except Exception:
+                self._state = previous
+                raise
+            response_task = copy.deepcopy(task)
+        for event in published_events:
+            self.event_bus.publish(event)
+        return {"task": self._enrich_task(response_task), "created": created, "idempotent": False, "workspace_id": workspace_id}
 
     def list_tasks(self, workspace_id: str = "default") -> list[dict[str, Any]]:
         with self._lock:

@@ -524,7 +524,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def _handle_native_post(self, parsed) -> bool:
         path = parsed.path
-        if path not in {"/api/mission-control/api/tasks", "/api/mission-control/api/agents", "/api/mission-control/api/agents/import", "/api/business-os", "/api/business-os/provisioning-runs"}:
+        if path not in {"/api/mission-control/api/tasks", "/api/mission-control/api/agents", "/api/mission-control/api/agents/import", "/api/mission-control/api/external-progress", "/api/openclaw/progress", "/api/business-os", "/api/business-os/provisioning-runs"}:
             return False
         payload, error = self._read_json_body()
         if error:
@@ -539,6 +539,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return True
             if path == "/api/mission-control/api/agents/import":
                 self._write_json(200, self.native_store.import_agents(payload))
+                return True
+            if path in {"/api/mission-control/api/external-progress", "/api/openclaw/progress"}:
+                result = self.native_store.ingest_external_task_progress(payload)
+                self._write_json(201 if result.get("created") else 200, result)
                 return True
             if path == "/api/business-os":
                 self._write_json(201, self.native_store.create_business_os(payload))
