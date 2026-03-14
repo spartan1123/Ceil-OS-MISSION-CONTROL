@@ -412,7 +412,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertTrue(any(event["agent_id"] == "agent-senku" for event in listed_events if event["task_id"] == listed_tasks[0]["id"]))
         self.assertEqual(len(RecordingMissionControlHandler.calls), 0)
 
-    def test_native_external_progress_is_idempotent_and_safe_on_unresolved_or_ambiguous_actor(self):
+    def test_native_external_progress_is_idempotent_across_replayed_older_events(self):
         server = self.make_dashboard()
         first = json.loads(
             self.request(
@@ -422,12 +422,51 @@ class DashboardServerTests(unittest.TestCase):
                 payload={"source": "discord", "actor": "mystery-external-runner", "external_run_id": "run-002", "external_event_id": "evt-001", "status": "started"},
             ).read().decode("utf-8")
         )
-        second = json.loads(
+        newer = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "actor": "mystery-external-runner", "external_run_id": "run-002", "external_event_id": "evt-002", "status": "completed"},
+            ).read().decode("utf-8")
+        )
+        replay = json.loads(
             self.request(
                 server,
                 path="/api/openclaw/progress",
                 method="POST",
                 payload={"source": "discord", "actor": "mystery-external-runner", "external_run_id": "run-002", "external_event_id": "evt-001", "status": "started"},
+            ).read().decode("utf-8")
+        )
+
+        self.assertIsNone(first["task"]["assigned_agent_id"])
+        self.assertEqual(newer["task"]["status"], "done")
+        self.assertTrue(replay["idempotent"])
+        self.assertEqual(replay["task"]["id"], first["task"]["id"])
+        self.assertEqual(replay["task"]["status"], "done")
+
+    def test_native_external_progress_clears_assignment_on_unresolved_or_ambiguous_actor_updates(self):
+        server = self.make_dashboard()
+        self.request(
+            server,
+            path="/api/mission-control/api/agents",
+            method="POST",
+            payload={"id": "agent-senku", "name": "Senku Ishigami", "role": "Provisioning Architect", "workspace_id": "default", "gateway_agent_id": "senku-ishigami"},
+        ).read()
+        assigned = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "actor": "senku-ishigami", "external_run_id": "run-assign", "status": "started"},
+            ).read().decode("utf-8")
+        )
+        unresolved = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "actor": "mystery-external-runner", "external_run_id": "run-assign", "status": "blocked"},
             ).read().decode("utf-8")
         )
         self.request(
@@ -447,17 +486,43 @@ class DashboardServerTests(unittest.TestCase):
                 server,
                 path="/api/openclaw/progress",
                 method="POST",
-                payload={"source": "discord", "actor": "orchestrator", "external_run_id": "run-003", "status": "started"},
+                payload={"source": "discord", "actor": "orchestrator", "external_run_id": "run-assign", "status": "started"},
             ).read().decode("utf-8")
         )
 
-        self.assertIsNone(first["task"]["assigned_agent_id"])
-        self.assertTrue(second["idempotent"])
-        self.assertEqual(second["task"]["id"], first["task"]["id"])
+        self.assertEqual(assigned["task"]["assigned_agent_id"], "agent-senku")
+        self.assertIsNone(unresolved["task"]["assigned_agent_id"])
         self.assertIsNone(ambiguous["task"]["assigned_agent_id"])
         listed_tasks = json.loads(self.request(server, path="/api/mission-control/api/tasks?workspace_id=default", method="GET").read().decode("utf-8"))
-        run_two = next(item for item in listed_tasks if item["external_run_id"] == "run-002")
-        self.assertIsNone(run_two["assigned_agent_id"])
+        run_task = next(item for item in listed_tasks if item["external_run_id"] == "run-assign")
+        self.assertIsNone(run_task["assigned_agent_id"])
+
+    def test_native_external_progress_uses_task_ref_in_sync_identity(self):
+        server = self.make_dashboard()
+        first = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "external_run_id": "run-shared", "external_task_ref": "task-a", "title": "First external task", "status": "started"},
+            ).read().decode("utf-8")
+        )
+        second = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "external_run_id": "run-shared", "external_task_ref": "task-b", "title": "Second external task", "status": "started"},
+            ).read().decode("utf-8")
+        )
+
+        self.assertTrue(first["created"])
+        self.assertTrue(second["created"])
+        self.assertNotEqual(first["task"]["id"], second["task"]["id"])
+        listed_tasks = json.loads(self.request(server, path="/api/mission-control/api/tasks?workspace_id=default", method="GET").read().decode("utf-8"))
+        run_tasks = [item for item in listed_tasks if item["external_run_id"] == "run-shared"]
+        self.assertEqual(len(run_tasks), 2)
+        self.assertEqual({item["external_task_ref"] for item in run_tasks}, {"task-a", "task-b"})
 
     def test_native_create_rejects_duplicate_task_ids(self):
         server = self.make_dashboard()

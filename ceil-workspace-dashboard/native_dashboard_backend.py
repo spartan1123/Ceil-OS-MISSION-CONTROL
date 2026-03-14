@@ -376,6 +376,15 @@ class NativeDashboardStore:
     def _normalize_external_task_sync(self, item: dict[str, Any]) -> dict[str, Any]:
         created_at = str(item.get("created_at") or now_iso())
         updated_at = str(item.get("updated_at") or created_at)
+        last_event_key = str(item.get("last_event_key") or "").strip() or None
+        processed_event_keys = [
+            str(value).strip()
+            for value in list(item.get("processed_event_keys") or [])
+            if str(value).strip()
+        ]
+        if last_event_key and last_event_key not in processed_event_keys:
+            processed_event_keys.append(last_event_key)
+        processed_event_keys = processed_event_keys[-64:]
         return {
             "id": str(item.get("id") or f"sync-{uuid.uuid4().hex[:10]}"),
             "source": str(item.get("source") or "external").strip() or "external",
@@ -385,7 +394,8 @@ class NativeDashboardStore:
             "business_id": str(item.get("business_id") or item.get("workspace_id") or "default").strip() or "default",
             "external_task_ref": str(item.get("external_task_ref") or "").strip() or None,
             "actor": str(item.get("actor") or "").strip() or None,
-            "last_event_key": str(item.get("last_event_key") or "").strip() or None,
+            "last_event_key": last_event_key,
+            "processed_event_keys": processed_event_keys,
             "last_status": str(item.get("last_status") or "").strip() or None,
             "metadata": copy.deepcopy(item.get("metadata") or {}),
             "created_at": created_at,
@@ -711,10 +721,13 @@ class NativeDashboardStore:
             self.event_bus.publish(event)
         return updated
 
-    def _find_external_task_sync_locked(self, source: str, external_run_id: str) -> dict[str, Any] | None:
+    def _find_external_task_sync_locked(self, source: str, external_run_id: str, external_task_ref: str | None = None) -> dict[str, Any] | None:
+        normalized_task_ref = str(external_task_ref or "").strip() or None
         return next((
             item for item in self._state["external_task_syncs"]
-            if str(item.get("source") or "") == source and str(item.get("external_run_id") or "") == external_run_id
+            if str(item.get("source") or "") == source
+            and str(item.get("external_run_id") or "") == external_run_id
+            and (str(item.get("external_task_ref") or "").strip() or None) == normalized_task_ref
         ), None)
 
     def resolve_external_actor_agent_id(self, actor: Any, workspace_id: str = "default") -> str | None:
@@ -748,6 +761,7 @@ class NativeDashboardStore:
             raise ValueError("external_run_id is required")
         workspace_id = str(payload.get("workspace_id") or "default").strip() or "default"
         business_id = str(payload.get("business_id") or workspace_id).strip() or workspace_id
+        external_task_ref = str(payload.get("external_task_ref") or "").strip() or None
         now = str(payload.get("occurred_at") or now_iso()).strip() or now_iso()
         event_key = build_external_event_key(payload)
         mapping = map_external_status(payload.get("status"), source, payload.get("actor"), payload.get("message"))
@@ -759,7 +773,7 @@ class NativeDashboardStore:
             "source": source,
             "actor": str(payload.get("actor") or "").strip() or None,
             "external_run_id": external_run_id,
-            "external_task_ref": str(payload.get("external_task_ref") or "").strip() or None,
+            "external_task_ref": external_task_ref,
             "external_event_id": str(payload.get("external_event_id") or "").strip() or None,
             "occurred_at": now,
             "external_status": str(payload.get("status") or "").strip() or None,
@@ -767,8 +781,13 @@ class NativeDashboardStore:
         }
         published_events: list[dict[str, Any]] = []
         with self._lock:
-            existing_sync = self._find_external_task_sync_locked(source, external_run_id)
-            if existing_sync and str(existing_sync.get("last_event_key") or "") == event_key:
+            existing_sync = self._find_external_task_sync_locked(source, external_run_id, external_task_ref)
+            processed_event_keys = [
+                str(value).strip()
+                for value in list((existing_sync or {}).get("processed_event_keys") or [])
+                if str(value).strip()
+            ]
+            if existing_sync and event_key in set(processed_event_keys):
                 task = next((copy.deepcopy(item) for item in self._state["tasks"] if str(item.get("id") or "") == str(existing_sync.get("task_id") or "")), None)
                 return {
                     "task": self._enrich_task(task),
@@ -797,7 +816,7 @@ class NativeDashboardStore:
                     "external_source": source,
                     "external_actor": str(payload.get("actor") or "").strip() or None,
                     "external_run_id": external_run_id,
-                    "external_task_ref": str(payload.get("external_task_ref") or "").strip() or None,
+                    "external_task_ref": external_task_ref,
                     "external_metadata": copy.deepcopy(metadata),
                     "created_at": now,
                     "updated_at": now,
@@ -812,12 +831,15 @@ class NativeDashboardStore:
                     task["description"] = str(payload.get("description") or "").strip() or None
                 task["status"] = mapping["task_status"]
                 task["status_reason"] = mapping["status_reason"]
-                if actor_agent_id is not None:
+                if "actor" in payload:
+                    # Safer update rule: when a later payload names an actor but resolution is
+                    # unresolved or ambiguous, clear any prior assignment instead of preserving
+                    # stale ownership.
                     task["assigned_agent_id"] = actor_agent_id
                 task["external_source"] = source
                 task["external_actor"] = str(payload.get("actor") or "").strip() or None
                 task["external_run_id"] = external_run_id
-                task["external_task_ref"] = str(payload.get("external_task_ref") or "").strip() or None
+                task["external_task_ref"] = external_task_ref
                 task["external_metadata"] = copy.deepcopy(metadata)
                 task["updated_at"] = now
             event = self._append_event_locked({
@@ -837,9 +859,10 @@ class NativeDashboardStore:
                 "task_id": task_id,
                 "workspace_id": workspace_id,
                 "business_id": business_id,
-                "external_task_ref": payload.get("external_task_ref"),
+                "external_task_ref": external_task_ref,
                 "actor": payload.get("actor"),
                 "last_event_key": event_key,
+                "processed_event_keys": (processed_event_keys + [event_key])[-64:] if event_key not in processed_event_keys else processed_event_keys[-64:],
                 "last_status": payload.get("status"),
                 "metadata": metadata,
                 "created_at": existing_sync.get("created_at") if existing_sync else now,
