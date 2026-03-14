@@ -55,3 +55,16 @@ Store real bot tokens only in private runtime secret stores (for example `agents
 - ariana: `[discord-token-redacted]`
 
 Add whatever helps you do your job. This is your cheat sheet.
+
+## Local Web Search Fallback
+
+- Wrapper: `/root/.openclaw/bin/web-search-fallback`
+- Source: `scripts/web_search_fallback.py`
+- Config: `/root/.openclaw/web-search-fallback.json`
+- State ledger: `/root/.openclaw/web-search-fallback-state.json`
+
+Usage examples:
+
+- `web-search-fallback search "query here"`
+- `web-search-fallback status`
+- `web-search-fallback record-spend brave 1.25`
