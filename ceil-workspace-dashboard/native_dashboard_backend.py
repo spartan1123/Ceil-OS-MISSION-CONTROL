@@ -384,7 +384,6 @@ class NativeDashboardStore:
         ]
         if last_event_key and last_event_key not in processed_event_keys:
             processed_event_keys.append(last_event_key)
-        processed_event_keys = processed_event_keys[-64:]
         return {
             "id": str(item.get("id") or f"sync-{uuid.uuid4().hex[:10]}"),
             "source": str(item.get("source") or "external").strip() or "external",
@@ -862,7 +861,7 @@ class NativeDashboardStore:
                 "external_task_ref": external_task_ref,
                 "actor": payload.get("actor"),
                 "last_event_key": event_key,
-                "processed_event_keys": (processed_event_keys + [event_key])[-64:] if event_key not in processed_event_keys else processed_event_keys[-64:],
+                "processed_event_keys": processed_event_keys + [event_key] if event_key not in processed_event_keys else processed_event_keys,
                 "last_status": payload.get("status"),
                 "metadata": metadata,
                 "created_at": existing_sync.get("created_at") if existing_sync else now,

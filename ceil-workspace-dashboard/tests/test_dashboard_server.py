@@ -445,6 +445,48 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(replay["task"]["id"], first["task"]["id"])
         self.assertEqual(replay["task"]["status"], "done")
 
+    def test_native_external_progress_dedupe_survives_long_event_history(self):
+        server = self.make_dashboard()
+        first = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "actor": "mystery-external-runner", "external_run_id": "run-002b", "external_event_id": "evt-001", "status": "started"},
+            ).read().decode("utf-8")
+        )
+
+        for index in range(2, 83):
+            response = json.loads(
+                self.request(
+                    server,
+                    path="/api/openclaw/progress",
+                    method="POST",
+                    payload={
+                        "source": "discord",
+                        "actor": "mystery-external-runner",
+                        "external_run_id": "run-002b",
+                        "external_event_id": f"evt-{index:03d}",
+                        "status": "completed" if index == 82 else "in_progress",
+                        "message": f"event-{index:03d}",
+                    },
+                ).read().decode("utf-8")
+            )
+
+        replay = json.loads(
+            self.request(
+                server,
+                path="/api/openclaw/progress",
+                method="POST",
+                payload={"source": "discord", "actor": "mystery-external-runner", "external_run_id": "run-002b", "external_event_id": "evt-001", "status": "started"},
+            ).read().decode("utf-8")
+        )
+
+        self.assertEqual(response["task"]["status"], "done")
+        self.assertTrue(replay["idempotent"])
+        self.assertEqual(replay["task"]["id"], first["task"]["id"])
+        self.assertEqual(replay["task"]["status"], "done")
+
     def test_native_external_progress_clears_assignment_on_unresolved_or_ambiguous_actor_updates(self):
         server = self.make_dashboard()
         self.request(
