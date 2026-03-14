@@ -2573,7 +2573,7 @@
         return;
       }
 
-      const LOCAL_KEY = "ceil-business-os-list-v1";
+      const BUSINESS_OS_API = "/api/business-os";
 
       const TEMPLATE_DEFS = [
         {
@@ -2663,24 +2663,29 @@
         return "workspace-manager";
       }
 
-      function loadOsList() {
-        try {
-          const raw = localStorage.getItem(LOCAL_KEY);
-          const parsed = raw ? JSON.parse(raw) : null;
-          if (Array.isArray(parsed) && parsed.length) {
-            osList = parsed;
-          } else {
-            osList = [...DEFAULT_OS];
-          }
-        } catch {
-          osList = [...DEFAULT_OS];
+      async function requestBusinessOs(url, options) {
+        const response = await fetch(url, {
+          headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
+          ...options,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload?.error?.message || payload?.message || `Business OS request failed (${response.status})`;
+          throw new Error(message);
         }
+        return payload;
       }
 
-      function saveOsList() {
+      async function loadOsList() {
         try {
-          localStorage.setItem(LOCAL_KEY, JSON.stringify(osList));
-        } catch {}
+          const payload = await requestBusinessOs(BUSINESS_OS_API, { method: "GET" });
+          const items = Array.isArray(payload?.items) ? payload.items : [];
+          osList = items.length ? items : [...DEFAULT_OS];
+        } catch (error) {
+          console.warn("Failed to load Business OS list; using local defaults.", error);
+          osList = [...DEFAULT_OS];
+        }
+        renderFlyoutList();
       }
 
       function statusMeta(status) {
@@ -2903,7 +2908,7 @@
         }
       }
 
-      function ensurePendingOsEntry() {
+      async function ensurePendingOsEntry() {
         const colorMap = {
           "app-studio": "#6366F1",
           "content-factory": "#EC4899",
@@ -2913,30 +2918,46 @@
           "custom": "#06B6D4",
         };
 
-        pendingOsId = `os-${Date.now()}`;
-        osList.unshift({
-          id: pendingOsId,
-          name: wizard.name,
-          template: wizard.templateId,
-          status: "Provisioning",
-          color: colorMap[wizard.templateId] || "#06B6D4",
+        const generatedId = `os-${Date.now()}`;
+        const created = await requestBusinessOs(BUSINESS_OS_API, {
+          method: "POST",
+          body: JSON.stringify({
+            id: generatedId,
+            slug: (wizard.name || "business-os").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || generatedId,
+            name: wizard.name,
+            description: wizard.description,
+            template: wizard.templateId,
+            status: "Provisioning",
+            color: colorMap[wizard.templateId] || "#06B6D4",
+            workspace_id: generatedId,
+            business_id: generatedId,
+            manager: wizard.manager,
+            cto: wizard.cto,
+            cmo: wizard.cmo,
+            cro: wizard.cro,
+          }),
         });
-        saveOsList();
+
+        pendingOsId = created.id;
+        osList = [created].concat(osList.filter(item => item.id !== created.id));
         renderFlyoutList();
       }
 
-      function finalizeProvisioning() {
-        if (!wizard || !wizard.provision) return;
+      async function finalizeProvisioning() {
+        if (!wizard || !wizard.provision || !pendingOsId) return;
         wizard.provision.done = true;
         wizard.provision.progress = 100;
 
-        const idx = osList.findIndex(o => o.id === pendingOsId);
-        if (idx !== -1) {
-          osList[idx].status = "Active";
-          osList[idx].color = "#10B981";
+        try {
+          const updated = await requestBusinessOs(`${BUSINESS_OS_API}/${encodeURIComponent(pendingOsId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: "Active", color: "#10B981" }),
+          });
+          osList = [updated].concat(osList.filter(item => item.id !== updated.id));
+          renderFlyoutList();
+        } catch (error) {
+          console.warn("Failed to finalize Business OS status.", error);
         }
-        saveOsList();
-        renderFlyoutList();
         renderStep4();
       }
 
@@ -2975,7 +2996,7 @@
         }
       }
 
-      function startProvisioning() {
+      async function startProvisioning() {
         if (!wizard) return;
 
         wizard.step = 4;
@@ -2987,7 +3008,15 @@
           logs: [],
         };
 
-        ensurePendingOsEntry();
+        try {
+          await ensurePendingOsEntry();
+        } catch (error) {
+          console.warn("Failed to create Business OS record.", error);
+          wizard.provision = null;
+          wizard.step = 3;
+          renderWizard();
+          return;
+        }
 
         addLog("[INFO] Starting OS provisioning sequence...");
         addLog(`[INFO] Failure policy: retries=${AGENT_RUNTIME_CONFIG.failurePolicy.retries}, backoff=${AGENT_RUNTIME_CONFIG.failurePolicy.backoffMs.join("/")}ms, timeout=${AGENT_RUNTIME_CONFIG.failurePolicy.hardTimeoutMs}ms`);
@@ -3103,7 +3132,6 @@
 
       // initial
       loadOsList();
-      renderFlyoutList();
 
     })();
     </script>

@@ -142,6 +142,8 @@ class DashboardServerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        self.native_state_path = self.root / "native-state.json"
+
         self.gateway = ThreadingHTTPServer(("127.0.0.1", 0), RecordingHandler)
         self.gateway_thread = threading.Thread(target=self.gateway.serve_forever, daemon=True)
         self.gateway_thread.start()
@@ -174,6 +176,7 @@ class DashboardServerTests(unittest.TestCase):
         server.mission_control_env_path = None
         server.mission_control_auth = {}
         server.council_event_bus = dashboard_server.CouncilEventBus()
+        server.native_store = dashboard_server.NativeDashboardStore(self.native_state_path)
         server.council_orchestrator = council_orchestrator or DummyCouncilOrchestrator()
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -244,6 +247,55 @@ class DashboardServerTests(unittest.TestCase):
         path = dashboard_server.find_config_for_port(str(self.default_config), 18789)
         self.assertEqual(path, str(self.default_config))
 
+    def test_native_business_os_endpoint_bootstraps_default_model(self):
+        server = self.make_dashboard()
+        with self.request(server, path="/api/business-os", method="GET") as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(any(item["id"] == "default" for item in body["items"]))
+        self.assertEqual(body["items"][0]["name"], "Default Business OS")
+
+    def test_native_task_agent_event_crud_uses_existing_mission_control_paths(self):
+        server = self.make_dashboard()
+        created_agent = json.loads(
+            self.request(
+                server,
+                path="/api/mission-control/api/agents",
+                method="POST",
+                payload={"name": "Senku", "role": "Developer", "workspace_id": "default"},
+            ).read().decode("utf-8")
+        )
+        created_task = json.loads(
+            self.request(
+                server,
+                path="/api/mission-control/api/tasks",
+                method="POST",
+                payload={"title": "Build native backend", "assigned_agent_id": created_agent["id"], "workspace_id": "default"},
+            ).read().decode("utf-8")
+        )
+
+        updated_task = json.loads(
+            self.request(
+                server,
+                path=f"/api/mission-control/api/tasks/{created_task['id']}",
+                method="PATCH",
+                payload={"status": "in_progress"},
+            ).read().decode("utf-8")
+        )
+        listed_tasks = json.loads(self.request(server, path="/api/mission-control/api/tasks?workspace_id=default", method="GET").read().decode("utf-8"))
+        listed_events = json.loads(self.request(server, path="/api/mission-control/api/events?workspace_id=default", method="GET").read().decode("utf-8"))
+        delete_resp = json.loads(
+            self.request(server, path=f"/api/mission-control/api/tasks/{created_task['id']}", method="DELETE").read().decode("utf-8")
+        )
+
+        self.assertEqual(created_task["assigned_agent"]["id"], created_agent["id"])
+        self.assertEqual(updated_task["status"], "in_progress")
+        self.assertEqual(listed_tasks[0]["id"], created_task["id"])
+        self.assertTrue(any(event["type"] == "task_created" for event in listed_events))
+        self.assertTrue(delete_resp["ok"])
+        self.assertEqual(len(RecordingMissionControlHandler.calls), 0)
+
     def test_proxy_forwards_with_same_origin_fallback_and_main_token(self):
         server = self.make_dashboard()
         with self.request(
@@ -311,7 +363,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(body["error"]["message"], "Invalid or disallowed gateway port")
         self.assertEqual(len(RecordingHandler.calls), 0)
 
-    def test_mission_control_get_proxy_forwards_requests(self):
+    def test_mission_control_tasks_route_is_now_native(self):
         server = self.make_dashboard()
         with self.request(
             server,
@@ -322,42 +374,55 @@ class DashboardServerTests(unittest.TestCase):
             body = json.loads(resp.read().decode("utf-8"))
 
         self.assertEqual(resp.status, 200)
-        self.assertEqual(body[0]["id"], "task-1")
-        forwarded = RecordingMissionControlHandler.calls[-1]
-        self.assertEqual(forwarded["method"], "GET")
-        self.assertEqual(forwarded["path"], "/api/tasks?workspace_id=default")
+        self.assertEqual(body, [])
+        self.assertEqual(len(RecordingMissionControlHandler.calls), 0)
 
-    def test_mission_control_patch_proxy_forwards_json_and_auth(self):
+    def test_mission_control_task_patch_route_is_now_native(self):
         server = self.make_dashboard()
-        server.mission_control_auth = {"bearer": "mc-token"}
+        created = json.loads(
+            self.request(
+                server,
+                path="/api/mission-control/api/tasks",
+                payload={"title": "Native patch target", "workspace_id": "default"},
+                headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+                method="POST",
+            ).read().decode("utf-8")
+        )
 
         with self.request(
             server,
-            path="/api/mission-control/api/tasks/task-1",
+            path=f"/api/mission-control/api/tasks/{created['id']}",
             payload={"status": "review"},
             headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
             method="PATCH",
         ) as resp:
             body = json.loads(resp.read().decode("utf-8"))
 
-        self.assertTrue(body["ok"])
-        forwarded = RecordingMissionControlHandler.calls[-1]
-        self.assertEqual(forwarded["method"], "PATCH")
-        self.assertEqual(forwarded["headers"]["Authorization"], "Bearer mc-token")
-        self.assertEqual(json.loads(forwarded["body"]), {"status": "review"})
+        self.assertEqual(body["status"], "review")
+        self.assertEqual(len(RecordingMissionControlHandler.calls), 0)
 
-    def test_mission_control_sse_proxy_streams_response(self):
+    def test_mission_control_events_stream_is_now_native_sse(self):
         server = self.make_dashboard()
+        self.request(
+            server,
+            path="/api/mission-control/api/tasks",
+            payload={"title": "SSE task", "workspace_id": "default"},
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="POST",
+        ).read()
+
         with self.request(
             server,
             path="/api/mission-control/api/events/stream?workspace_id=default",
             headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
             method="GET",
         ) as resp:
-            body = resp.read().decode("utf-8")
+            first_line = resp.fp.readline().decode("utf-8")
+            second_line = resp.fp.readline().decode("utf-8")
+            body = first_line + second_line
 
         self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
-        self.assertIn("task_updated", body)
+        self.assertTrue("business_os_seeded" in body or "task_created" in body)
 
     def test_council_start_requires_topic(self):
         server = self.make_dashboard()

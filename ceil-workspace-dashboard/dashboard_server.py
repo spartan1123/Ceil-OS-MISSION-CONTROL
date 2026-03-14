@@ -24,6 +24,7 @@ if str(CURRENT_DIR) not in sys.path:
 from council_events import CouncilEventBus
 from council_orchestrator import CouncilOrchestrator
 from council_storage import CouncilArtifactStore
+from native_dashboard_backend import NativeDashboardStore
 
 
 def parse_allowed_gateway_ports(raw: str | None) -> set[int]:
@@ -55,6 +56,7 @@ DEFAULT_TOOLS_URL = "http://127.0.0.1:18789/tools/invoke"
 DEFAULT_MISSION_CONTROL_URL = "http://127.0.0.1:4000"
 DEFAULT_MISSION_CONTROL_ENV_PATH = "/root/.openclaw/workspace/autensa/.env.local"
 DEFAULT_COUNCIL_ARTIFACT_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.council-artifacts"
+DEFAULT_NATIVE_STATE_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.native-dashboard/state.json"
 DEFAULT_ALLOWED_GATEWAY_PORTS = {18789, 19001, 19011, 19031, 19051, 19081, 19091, 19101, 19111}
 DEFAULT_PORT_CONFIG_MAP = {
     18789: "/root/.openclaw/openclaw.json",
@@ -215,6 +217,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def council_orchestrator(self):
         return self.server.council_orchestrator  # type: ignore[attr-defined]
 
+    @property
+    def native_store(self):
+        return self.server.native_store  # type: ignore[attr-defined]
+
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         # Keep request logs concise and never print headers/token values.
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -249,7 +255,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     @property
     def mission_control_url(self) -> str:
@@ -446,8 +455,128 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         finally:
             self.council_event_bus.unsubscribe(run_id, subscription)
 
+    def _native_workspace_id(self, parsed) -> str:
+        return parse_qs(parsed.query or "").get("workspace_id", ["default"])[0].strip() or "default"
+
+    def _handle_native_events_stream(self, parsed) -> None:
+        workspace_id = self._native_workspace_id(parsed)
+        subscription = self.native_store.event_bus.subscribe(workspace_id)
+        history = self.native_store.list_events(workspace_id)
+
+        self.send_response(200)
+        self._add_cors_headers_if_allowed()
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        try:
+            for event in reversed(history[:50]):
+                self.wfile.write(self.native_store.event_bus.format_sse(event))
+            self.wfile.flush()
+            while True:
+                try:
+                    event = subscription.queue.get(timeout=15)
+                except queue.Empty:
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    continue
+                self.wfile.write(self.native_store.event_bus.format_sse(event))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        finally:
+            self.native_store.event_bus.unsubscribe(subscription)
+
+    def _handle_native_get(self, parsed) -> bool:
+        path = parsed.path
+        workspace_id = self._native_workspace_id(parsed)
+        if path == "/api/mission-control/api/tasks":
+            self._write_json(200, self.native_store.list_tasks(workspace_id))
+            return True
+        if path == "/api/mission-control/api/agents":
+            self._write_json(200, self.native_store.list_agents(workspace_id))
+            return True
+        if path == "/api/mission-control/api/events":
+            self._write_json(200, self.native_store.list_events(workspace_id))
+            return True
+        if path == "/api/mission-control/api/events/stream":
+            self._handle_native_events_stream(parsed)
+            return True
+        if path == "/api/mission-control/api/agents/discover":
+            self._write_json(200, self.native_store.discover_gateway_agents(workspace_id))
+            return True
+        if path == "/api/business-os":
+            self._write_json(200, {"items": self.native_store.list_business_os()})
+            return True
+        return False
+
+    def _handle_native_post(self, parsed) -> bool:
+        path = parsed.path
+        if path not in {"/api/mission-control/api/tasks", "/api/mission-control/api/agents", "/api/mission-control/api/agents/import", "/api/business-os"}:
+            return False
+        payload, error = self._read_json_body()
+        if error:
+            self._write_json(error[0], error[1])
+            return True
+        try:
+            if path == "/api/mission-control/api/tasks":
+                self._write_json(201, self.native_store.create_task(payload))
+                return True
+            if path == "/api/mission-control/api/agents":
+                self._write_json(201, self.native_store.create_agent(payload))
+                return True
+            if path == "/api/mission-control/api/agents/import":
+                self._write_json(200, self.native_store.import_agents(payload))
+                return True
+            if path == "/api/business-os":
+                self._write_json(201, self.native_store.create_business_os(payload))
+                return True
+        except ValueError as exc:
+            self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": str(exc)}})
+            return True
+        return False
+
+    def _handle_native_patch(self, parsed) -> bool:
+        payload, error = self._read_json_body()
+        if error:
+            self._write_json(error[0], error[1])
+            return True
+        path = parsed.path
+        if path.startswith("/api/mission-control/api/tasks/"):
+            task_id = path.rsplit("/", 1)[-1]
+            updated = self.native_store.update_task(task_id, payload)
+            if not updated:
+                self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown task: {task_id}"}})
+            else:
+                self._write_json(200, updated)
+            return True
+        if path.startswith("/api/business-os/"):
+            business_os_id = path.rsplit("/", 1)[-1]
+            updated = self.native_store.update_business_os(business_os_id, payload)
+            if not updated:
+                self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown Business OS: {business_os_id}"}})
+            else:
+                self._write_json(200, updated)
+            return True
+        return False
+
+    def _handle_native_delete(self, parsed) -> bool:
+        path = parsed.path
+        if path.startswith("/api/mission-control/api/tasks/"):
+            task_id = path.rsplit("/", 1)[-1]
+            deleted = self.native_store.delete_task(task_id)
+            if not deleted:
+                self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown task: {task_id}"}})
+            else:
+                self._write_json(200, {"ok": True, "deleted": task_id})
+            return True
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if self._handle_native_get(parsed):
+            return
         if parsed.path.startswith("/api/mission-control/"):
             self._proxy_mission_control_request("GET", parsed, stream=parsed.path.endswith("/events/stream"))
             return
@@ -570,6 +699,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if self._handle_native_post(parsed):
+            return
         if parsed.path.startswith("/api/mission-control/"):
             raw_len = self.headers.get("Content-Length")
             try:
@@ -655,6 +786,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_PATCH(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if self._handle_native_patch(parsed):
+            return
         if not parsed.path.startswith("/api/mission-control/"):
             self.send_error(404)
             return
@@ -671,6 +804,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if self._handle_native_delete(parsed):
+            return
         if not parsed.path.startswith("/api/mission-control/"):
             self.send_error(404)
             return
@@ -713,6 +848,11 @@ def main() -> int:
         default=os.getenv("DASHBOARD_COUNCIL_ARTIFACT_PATH", DEFAULT_COUNCIL_ARTIFACT_PATH),
         help="Directory for persisted council decision/action artifacts.",
     )
+    parser.add_argument(
+        "--native-state-path",
+        default=os.getenv("DASHBOARD_NATIVE_STATE_PATH", DEFAULT_NATIVE_STATE_PATH),
+        help="Path for native dashboard JSON state backing tasks, agents, events, and Business OS records.",
+    )
     args = parser.parse_args()
 
     try:
@@ -735,6 +875,7 @@ def main() -> int:
         os.getenv("MC_BASIC_AUTH_PASS"),
     )
     server.council_event_bus = CouncilEventBus()  # type: ignore[attr-defined]
+    server.native_store = NativeDashboardStore(args.native_state_path)  # type: ignore[attr-defined]
     server.council_orchestrator = CouncilOrchestrator(  # type: ignore[attr-defined]
         event_bus=server.council_event_bus,
         tools_url_for_port=lambda port: f"http://127.0.0.1:{port}/tools/invoke",
