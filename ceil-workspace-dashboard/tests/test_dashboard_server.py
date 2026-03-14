@@ -410,6 +410,78 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(updated["leadership"]["manager"], created["manager"])
         self.assertEqual(updated["leadership"]["cto"], "Kaseki")
 
+    def test_native_business_os_creation_persists_template_and_provisioning_metadata(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "business-os-metadata.json")
+        created = store.create_business_os({
+            "id": "ops-core",
+            "name": "Ops Core",
+            "workspace_id": "ops-core",
+            "business_id": "ops-core",
+            "template": "app-studio",
+            "template_selection": {"template_id": "app-studio", "selected_at": "2026-03-14T19:40:00Z", "source": "wizard"},
+            "provisioning": {"status": "queued", "progress": 2, "step": "validate-payload", "deep_research_required": True, "deep_research_status": "queued"},
+        })
+
+        self.assertEqual(created["template_selection"]["template_id"], "app-studio")
+        self.assertEqual(created["provisioning"]["status"], "queued")
+        self.assertTrue(created["provisioning"]["deep_research_required"])
+        persisted = json.loads((self.root / "business-os-metadata.json").read_text(encoding="utf-8"))
+        persisted_item = next(item for item in persisted["business_os"] if item["id"] == "ops-core")
+        self.assertEqual(persisted_item["template_selection"]["source"], "wizard")
+        self.assertEqual(persisted_item["provisioning"]["step"], "validate-payload")
+
+    def test_native_provisioning_run_crud_updates_business_os_projection(self):
+        server = self.make_dashboard()
+        created = json.loads(
+            self.request(
+                server,
+                path="/api/business-os",
+                method="POST",
+                payload={"id": "ops-core", "name": "Ops Core", "workspace_id": "ops-core", "business_id": "ops-core", "template": "app-studio"},
+            ).read().decode("utf-8")
+        )
+
+        run = json.loads(
+            self.request(
+                server,
+                path="/api/business-os/provisioning-runs",
+                method="POST",
+                payload={
+                    "id": "prov-ops-core",
+                    "business_os_id": created["id"],
+                    "workspace_id": created["workspace_id"],
+                    "business_id": created["business_id"],
+                    "status": "running",
+                    "progress": 25,
+                    "current_step": "scaffold-structure",
+                    "template_selection": {"template_id": "app-studio", "selected_at": "2026-03-14T19:40:00Z", "source": "wizard"},
+                    "deep_research": {"required": True, "status": "queued"},
+                    "steps": [{"title": "Scaffold Structure", "state": "running"}],
+                    "logs": ["started"],
+                },
+            ).read().decode("utf-8")
+        )
+        updated_run = json.loads(
+            self.request(
+                server,
+                path="/api/business-os/provisioning-runs/prov-ops-core",
+                method="PATCH",
+                payload={"status": "completed", "progress": 100, "current_step": "ready", "completed_at": "2026-03-14T19:49:00Z"},
+            ).read().decode("utf-8")
+        )
+        listed_runs = json.loads(
+            self.request(server, path="/api/business-os/provisioning-runs?business_os_id=ops-core", method="GET").read().decode("utf-8")
+        )
+        refreshed = json.loads(self.request(server, path="/api/business-os", method="GET").read().decode("utf-8"))
+        os_item = next(item for item in refreshed["items"] if item["id"] == "ops-core")
+
+        self.assertEqual(run["status"], "running")
+        self.assertEqual(updated_run["status"], "completed")
+        self.assertEqual(listed_runs["items"][0]["id"], "prov-ops-core")
+        self.assertEqual(os_item["provisioning"]["last_run_id"], "prov-ops-core")
+        self.assertEqual(os_item["provisioning"]["status"], "completed")
+        self.assertEqual(os_item["status"], "Active")
+
     def test_proxy_forwards_with_same_origin_fallback_and_main_token(self):
         server = self.make_dashboard()
         with self.request(

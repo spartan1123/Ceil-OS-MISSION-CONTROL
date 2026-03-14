@@ -23,6 +23,11 @@ DEFAULT_BUSINESS_OS = {
     "name": "Default Business OS",
     "description": "Migrated native default Business OS for the current CL dashboard.",
     "template": DEFAULT_BUSINESS_TEMPLATE,
+    "template_selection": {
+        "template_id": DEFAULT_BUSINESS_TEMPLATE,
+        "selected_at": None,
+        "source": "migration",
+    },
     "status": "Active",
     "color": "#10B981",
     "is_default": True,
@@ -30,6 +35,18 @@ DEFAULT_BUSINESS_OS = {
     "business_id": "default",
     "manager": "Workspace Manager",
     "leadership": {},
+    "provisioning": {
+        "status": "ready",
+        "current_run_id": None,
+        "last_run_id": None,
+        "last_completed_at": None,
+        "last_event_at": None,
+        "progress": 100,
+        "step": "ready",
+        "template_id": DEFAULT_BUSINESS_TEMPLATE,
+        "deep_research_required": False,
+        "deep_research_status": "not_started",
+    },
 }
 
 
@@ -80,6 +97,7 @@ class NativeDashboardStore:
         created_at = now_iso()
         return {
             "business_os": [dict(DEFAULT_BUSINESS_OS, created_at=created_at, updated_at=created_at)],
+            "provisioning_runs": [],
             "tasks": [],
             "agents": [],
             "events": [
@@ -121,13 +139,16 @@ class NativeDashboardStore:
     def _normalize_state(self, payload: dict[str, Any]) -> dict[str, Any]:
         state = {
             "business_os": list(payload.get("business_os") or []),
+            "provisioning_runs": list(payload.get("provisioning_runs") or []),
             "tasks": list(payload.get("tasks") or []),
             "agents": list(payload.get("agents") or []),
             "events": list(payload.get("events") or []),
         }
+        state["business_os"] = [self._normalize_business_os_record(item) for item in state["business_os"] if isinstance(item, dict)]
+        state["provisioning_runs"] = [self._normalize_provisioning_run(item) for item in state["provisioning_runs"] if isinstance(item, dict)]
         if not any(str(item.get("id") or "") == "default" for item in state["business_os"]):
             created_at = now_iso()
-            state["business_os"].insert(0, dict(DEFAULT_BUSINESS_OS, created_at=created_at, updated_at=created_at))
+            state["business_os"].insert(0, self._normalize_business_os_record(dict(DEFAULT_BUSINESS_OS, created_at=created_at, updated_at=created_at)))
         return state
 
     def _write_state(self, state: dict[str, Any]) -> None:
@@ -151,6 +172,116 @@ class NativeDashboardStore:
     def _snapshot(self) -> dict[str, Any]:
         return copy.deepcopy(self._state)
 
+    def _normalize_business_os_record(self, item: dict[str, Any]) -> dict[str, Any]:
+        created_at = str(item.get("created_at") or now_iso())
+        updated_at = str(item.get("updated_at") or created_at)
+        business_os_id = str(item.get("id") or item.get("business_os_id") or f"os-{uuid.uuid4().hex[:10]}").strip()
+        template = str(item.get("template") or DEFAULT_BUSINESS_TEMPLATE).strip() or DEFAULT_BUSINESS_TEMPLATE
+        workspace_id = str(item.get("workspace_id") or business_os_id).strip() or business_os_id
+        business_id = str(item.get("business_id") or workspace_id).strip() or workspace_id
+        leadership_payload = item.get("leadership") if isinstance(item.get("leadership"), dict) else {}
+        manager = str(item.get("manager") or leadership_payload.get("manager") or "Workspace Manager").strip() or "Workspace Manager"
+        leadership = {
+            "manager": manager,
+            "cto": str(item.get("cto") or leadership_payload.get("cto") or "").strip(),
+            "cmo": str(item.get("cmo") or leadership_payload.get("cmo") or "").strip(),
+            "cro": str(item.get("cro") or leadership_payload.get("cro") or "").strip(),
+        }
+        template_selection_payload = item.get("template_selection") if isinstance(item.get("template_selection"), dict) else {}
+        provisioning_payload = item.get("provisioning") if isinstance(item.get("provisioning"), dict) else {}
+        return {
+            "id": business_os_id,
+            "slug": str(item.get("slug") or business_os_id).strip() or business_os_id,
+            "name": str(item.get("name") or "").strip(),
+            "description": str(item.get("description") or "").strip() or None,
+            "template": template,
+            "template_selection": {
+                "template_id": str(template_selection_payload.get("template_id") or template).strip() or template,
+                "selected_at": template_selection_payload.get("selected_at") or created_at,
+                "source": str(template_selection_payload.get("source") or item.get("template_selection_source") or ("migration" if item.get("is_default") else "wizard")).strip() or "wizard",
+            },
+            "status": str(item.get("status") or "Provisioning").strip() or "Provisioning",
+            "color": str(item.get("color") or "#06B6D4").strip() or "#06B6D4",
+            "is_default": bool(item.get("is_default")),
+            "workspace_id": workspace_id,
+            "business_id": business_id,
+            "business_os_id": business_os_id,
+            "manager": manager,
+            "leadership": leadership,
+            "provisioning": {
+                "status": str(provisioning_payload.get("status") or ("ready" if str(item.get("status") or "") == "Active" else "pending")).strip() or "pending",
+                "current_run_id": provisioning_payload.get("current_run_id"),
+                "last_run_id": provisioning_payload.get("last_run_id"),
+                "last_completed_at": provisioning_payload.get("last_completed_at"),
+                "last_event_at": provisioning_payload.get("last_event_at") or updated_at,
+                "progress": int(provisioning_payload.get("progress") if provisioning_payload.get("progress") is not None else (100 if str(item.get("status") or "") == "Active" else 0)),
+                "step": str(provisioning_payload.get("step") or ("ready" if str(item.get("status") or "") == "Active" else "queued")).strip() or "queued",
+                "template_id": str(provisioning_payload.get("template_id") or template).strip() or template,
+                "deep_research_required": bool(provisioning_payload.get("deep_research_required")),
+                "deep_research_status": str(provisioning_payload.get("deep_research_status") or ("not_started" if not provisioning_payload.get("deep_research_required") else "queued")).strip() or "not_started",
+            },
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+
+    def _normalize_provisioning_run(self, item: dict[str, Any]) -> dict[str, Any]:
+        created_at = str(item.get("created_at") or now_iso())
+        updated_at = str(item.get("updated_at") or created_at)
+        template_payload = item.get("template_selection") if isinstance(item.get("template_selection"), dict) else {}
+        steps = [copy.deepcopy(step) for step in (item.get("steps") or []) if isinstance(step, dict)]
+        logs = [str(line) for line in (item.get("logs") or []) if str(line).strip()]
+        return {
+            "id": str(item.get("id") or f"prov-{uuid.uuid4().hex[:10]}"),
+            "business_os_id": str(item.get("business_os_id") or item.get("workspace_id") or "default").strip() or "default",
+            "workspace_id": str(item.get("workspace_id") or item.get("business_os_id") or "default").strip() or "default",
+            "business_id": str(item.get("business_id") or item.get("business_os_id") or item.get("workspace_id") or "default").strip() or "default",
+            "status": str(item.get("status") or "queued").strip() or "queued",
+            "progress": int(item.get("progress") if item.get("progress") is not None else 0),
+            "current_step": str(item.get("current_step") or "queued").strip() or "queued",
+            "template_selection": {
+                "template_id": str(template_payload.get("template_id") or item.get("template") or DEFAULT_BUSINESS_TEMPLATE).strip() or DEFAULT_BUSINESS_TEMPLATE,
+                "selected_at": template_payload.get("selected_at") or created_at,
+                "source": str(template_payload.get("source") or "wizard").strip() or "wizard",
+            },
+            "deep_research": {
+                "required": bool((item.get("deep_research") or {}).get("required") if isinstance(item.get("deep_research"), dict) else item.get("deep_research_required")),
+                "status": str(((item.get("deep_research") or {}).get("status") if isinstance(item.get("deep_research"), dict) else item.get("deep_research_status")) or "not_started").strip() or "not_started",
+            },
+            "wizard_payload": copy.deepcopy(item.get("wizard_payload") or {}),
+            "steps": steps,
+            "logs": logs[-120:],
+            "started_at": item.get("started_at") or created_at,
+            "completed_at": item.get("completed_at"),
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+
+    def _find_business_os_locked(self, business_os_id: str) -> dict[str, Any] | None:
+        return next((item for item in self._state["business_os"] if str(item.get("id") or "") == business_os_id), None)
+
+    def _find_provisioning_run_locked(self, run_id: str) -> dict[str, Any] | None:
+        return next((item for item in self._state["provisioning_runs"] if str(item.get("id") or "") == run_id), None)
+
+    def _sync_business_os_provisioning_locked(self, business: dict[str, Any], run: dict[str, Any]) -> None:
+        business["template"] = run["template_selection"]["template_id"]
+        business.setdefault("template_selection", {})
+        business["template_selection"] = copy.deepcopy(run["template_selection"])
+        business.setdefault("provisioning", {})
+        business["provisioning"].update({
+            "status": run["status"],
+            "current_run_id": None if run["status"] in {"completed", "failed", "cancelled"} else run["id"],
+            "last_run_id": run["id"],
+            "last_completed_at": run.get("completed_at") if run["status"] == "completed" else business["provisioning"].get("last_completed_at"),
+            "last_event_at": run["updated_at"],
+            "progress": run["progress"],
+            "step": run["current_step"],
+            "template_id": run["template_selection"]["template_id"],
+            "deep_research_required": run["deep_research"]["required"],
+            "deep_research_status": run["deep_research"]["status"],
+        })
+        business["status"] = "Active" if run["status"] == "completed" else "Provisioning"
+        business["updated_at"] = run["updated_at"]
+
     def list_business_os(self) -> list[dict[str, Any]]:
         with self._lock:
             return copy.deepcopy(self._state["business_os"])
@@ -166,29 +297,30 @@ class NativeDashboardStore:
         created_at = now_iso()
         template = str(payload.get("template") or DEFAULT_BUSINESS_TEMPLATE).strip() or DEFAULT_BUSINESS_TEMPLATE
         business_os_id = str(payload.get("id") or f"os-{uuid.uuid4().hex[:10]}")
-        leadership = {
-            "manager": str(payload.get("manager") or "").strip(),
-            "cto": str(payload.get("cto") or "").strip(),
-            "cmo": str(payload.get("cmo") or "").strip(),
-            "cro": str(payload.get("cro") or "").strip(),
-        }
-        business = {
+        business = self._normalize_business_os_record({
+            **payload,
             "id": business_os_id,
-            "slug": str(payload.get("slug") or business_os_id).strip(),
-            "name": str(payload.get("name") or "").strip(),
-            "description": str(payload.get("description") or "").strip() or None,
             "template": template,
-            "status": str(payload.get("status") or "Provisioning").strip() or "Provisioning",
-            "color": str(payload.get("color") or "#06B6D4").strip() or "#06B6D4",
-            "is_default": bool(payload.get("is_default")),
-            "workspace_id": str(payload.get("workspace_id") or business_os_id).strip() or business_os_id,
-            "business_id": str(payload.get("business_id") or business_os_id).strip() or business_os_id,
-            "business_os_id": business_os_id,
-            "manager": leadership["manager"] or "Workspace Manager",
-            "leadership": leadership,
+            "template_selection": payload.get("template_selection") or {
+                "template_id": template,
+                "selected_at": created_at,
+                "source": "wizard",
+            },
+            "provisioning": payload.get("provisioning") or {
+                "status": "ready" if str(payload.get("status") or "") == "Active" else "pending",
+                "current_run_id": None,
+                "last_run_id": None,
+                "last_completed_at": None,
+                "last_event_at": created_at,
+                "progress": 100 if str(payload.get("status") or "") == "Active" else 0,
+                "step": "ready" if str(payload.get("status") or "") == "Active" else "queued",
+                "template_id": template,
+                "deep_research_required": False,
+                "deep_research_status": "not_started",
+            },
             "created_at": created_at,
             "updated_at": created_at,
-        }
+        })
         if not business["name"]:
             raise ValueError("Business OS name is required")
 
@@ -230,11 +362,28 @@ class NativeDashboardStore:
                         value = str(patch[key]).strip()
                         if value:
                             item[key] = value
+                if "template" in patch and str(patch.get("template") or "").strip():
+                    item.setdefault("template_selection", {})["template_id"] = item["template"]
+                if "template_selection" in patch and isinstance(patch.get("template_selection"), dict):
+                    incoming = patch["template_selection"]
+                    item.setdefault("template_selection", {})
+                    for key in ["template_id", "selected_at", "source"]:
+                        if incoming.get(key) is not None and str(incoming.get(key)).strip():
+                            item["template_selection"][key] = str(incoming.get(key)).strip()
+                    item["template"] = str(item["template_selection"].get("template_id") or item.get("template") or DEFAULT_BUSINESS_TEMPLATE).strip() or DEFAULT_BUSINESS_TEMPLATE
                 for leader_key in ["manager", "cto", "cmo", "cro"]:
                     if leader_key in patch:
                         item.setdefault("leadership", {})[leader_key] = str(patch.get(leader_key) or "").strip()
+                if "provisioning" in patch and isinstance(patch.get("provisioning"), dict):
+                    item.setdefault("provisioning", {})
+                    for key, value in patch["provisioning"].items():
+                        if value is not None:
+                            item["provisioning"][key] = value
                 item["manager"] = str(item.get("manager") or item.get("leadership", {}).get("manager") or "Workspace Manager").strip() or "Workspace Manager"
                 item.setdefault("leadership", {})["manager"] = item["manager"]
+                normalized = self._normalize_business_os_record(item)
+                item.clear()
+                item.update(normalized)
                 item["updated_at"] = now_iso()
                 updated = copy.deepcopy(item)
                 event = self._append_event_locked(
@@ -253,6 +402,93 @@ class NativeDashboardStore:
                     self._state = previous
                     raise
                 break
+        if event:
+            self.event_bus.publish(event)
+        return updated
+
+    def list_provisioning_runs(self, business_os_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            runs = copy.deepcopy(self._state["provisioning_runs"])
+        if business_os_id:
+            runs = [item for item in runs if str(item.get("business_os_id") or "") == business_os_id]
+        return sorted(runs, key=lambda item: str(item.get("created_at") or ""), reverse=True)
+
+    def create_provisioning_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created_at = now_iso()
+        business_os_id = str(payload.get("business_os_id") or payload.get("workspace_id") or "").strip()
+        if not business_os_id:
+            raise ValueError("business_os_id is required")
+        run = self._normalize_provisioning_run({**payload, "business_os_id": business_os_id, "created_at": created_at, "updated_at": created_at})
+        event: dict[str, Any] | None = None
+        with self._lock:
+            business = self._find_business_os_locked(business_os_id)
+            if business is None:
+                raise ValueError(f"Unknown Business OS: {business_os_id}")
+            if any(str(item.get("id") or "") == run["id"] for item in self._state["provisioning_runs"]):
+                raise ValueError(f"Provisioning run already exists: {run['id']}")
+            previous = self._snapshot()
+            self._state["provisioning_runs"].insert(0, run)
+            self._sync_business_os_provisioning_locked(business, run)
+            event = self._append_event_locked({
+                "type": "business_os_provisioning_run_created",
+                "workspace_id": run["workspace_id"],
+                "business_id": run["business_id"],
+                "business_os_id": business_os_id,
+                "message": f'Provisioning started: {business.get("name") or business_os_id}',
+                "business_os": business,
+            })
+            try:
+                self._persist_locked()
+            except Exception:
+                self._state = previous
+                raise
+        if event:
+            self.event_bus.publish(event)
+        return copy.deepcopy(run)
+
+    def update_provisioning_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        event: dict[str, Any] | None = None
+        updated: dict[str, Any] | None = None
+        with self._lock:
+            run = self._find_provisioning_run_locked(run_id)
+            if run is None:
+                return None
+            business = self._find_business_os_locked(str(run.get("business_os_id") or ""))
+            if business is None:
+                raise ValueError(f"Unknown Business OS: {run.get('business_os_id')}")
+            previous = self._snapshot()
+            for key in ["status", "progress", "current_step", "completed_at", "started_at"]:
+                if key in patch and patch[key] is not None:
+                    run[key] = patch[key]
+            if "template_selection" in patch and isinstance(patch.get("template_selection"), dict):
+                run.setdefault("template_selection", {}).update(copy.deepcopy(patch["template_selection"]))
+            if "deep_research" in patch and isinstance(patch.get("deep_research"), dict):
+                run.setdefault("deep_research", {}).update(copy.deepcopy(patch["deep_research"]))
+            if "wizard_payload" in patch and isinstance(patch.get("wizard_payload"), dict):
+                run["wizard_payload"] = copy.deepcopy(patch["wizard_payload"])
+            if "steps" in patch and isinstance(patch.get("steps"), list):
+                run["steps"] = [copy.deepcopy(step) for step in patch["steps"] if isinstance(step, dict)]
+            if "logs" in patch and isinstance(patch.get("logs"), list):
+                run["logs"] = [str(line) for line in patch["logs"] if str(line).strip()][-120:]
+            run["updated_at"] = now_iso()
+            normalized = self._normalize_provisioning_run(run)
+            run.clear()
+            run.update(normalized)
+            self._sync_business_os_provisioning_locked(business, run)
+            updated = copy.deepcopy(run)
+            event = self._append_event_locked({
+                "type": "business_os_provisioning_run_updated",
+                "workspace_id": run["workspace_id"],
+                "business_id": run["business_id"],
+                "business_os_id": run["business_os_id"],
+                "message": f'Provisioning updated: {business.get("name") or run["business_os_id"]} ({run["status"]})',
+                "business_os": business,
+            })
+            try:
+                self._persist_locked()
+            except Exception:
+                self._state = previous
+                raise
         if event:
             self.event_bus.publish(event)
         return updated

@@ -516,11 +516,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/business-os":
             self._write_json(200, {"items": self.native_store.list_business_os()})
             return True
+        if path == "/api/business-os/provisioning-runs":
+            business_os_id = parse_qs(parsed.query or "").get("business_os_id", [None])[0]
+            self._write_json(200, {"items": self.native_store.list_provisioning_runs(business_os_id)})
+            return True
         return False
 
     def _handle_native_post(self, parsed) -> bool:
         path = parsed.path
-        if path not in {"/api/mission-control/api/tasks", "/api/mission-control/api/agents", "/api/mission-control/api/agents/import", "/api/business-os"}:
+        if path not in {"/api/mission-control/api/tasks", "/api/mission-control/api/agents", "/api/mission-control/api/agents/import", "/api/business-os", "/api/business-os/provisioning-runs"}:
             return False
         payload, error = self._read_json_body()
         if error:
@@ -539,6 +543,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if path == "/api/business-os":
                 self._write_json(201, self.native_store.create_business_os(payload))
                 return True
+            if path == "/api/business-os/provisioning-runs":
+                self._write_json(201, self.native_store.create_provisioning_run(payload))
+                return True
         except ValueError as exc:
             self._write_json(400, {"ok": False, "error": {"type": "bad_request", "message": str(exc)}})
             return True
@@ -555,6 +562,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             updated = self.native_store.update_task(task_id, payload)
             if not updated:
                 self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown task: {task_id}"}})
+            else:
+                self._write_json(200, updated)
+            return True
+        if path.startswith("/api/business-os/provisioning-runs/"):
+            run_id = path.rsplit("/", 1)[-1]
+            updated = self.native_store.update_provisioning_run(run_id, payload)
+            if not updated:
+                self._write_json(404, {"ok": False, "error": {"type": "not_found", "message": f"Unknown provisioning run: {run_id}"}})
             else:
                 self._write_json(200, updated)
             return True
