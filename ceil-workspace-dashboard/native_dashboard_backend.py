@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import queue
 import threading
 import uuid
@@ -100,12 +101,22 @@ class NativeDashboardStore:
             try:
                 payload = json.loads(self.path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
+                self._quarantine_corrupt_state()
                 payload = self._default_state()
         else:
             payload = self._default_state()
         payload = self._normalize_state(payload)
         self._write_state(payload)
         return payload
+
+    def _quarantine_corrupt_state(self) -> None:
+        if not self.path.exists():
+            return
+        quarantine = self.path.with_name(f"{self.path.stem}.corrupt-{uuid.uuid4().hex[:8]}{self.path.suffix}")
+        try:
+            self.path.replace(quarantine)
+        except OSError:
+            return
 
     def _normalize_state(self, payload: dict[str, Any]) -> dict[str, Any]:
         state = {
@@ -120,7 +131,22 @@ class NativeDashboardStore:
         return state
 
     def _write_state(self, state: dict[str, Any]) -> None:
-        self.path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        body = json.dumps(state, indent=2, sort_keys=True)
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, self.path)
+
+    def _persist_locked(self) -> None:
+        snapshot = copy.deepcopy(self._state)
+        try:
+            self._write_state(snapshot)
+        except Exception:
+            self._state = snapshot
+            raise
 
     def _snapshot(self) -> dict[str, Any]:
         return copy.deepcopy(self._state)
@@ -170,6 +196,7 @@ class NativeDashboardStore:
         with self._lock:
             if any(str(item.get("id") or "") == business_os_id for item in self._state["business_os"]):
                 raise ValueError(f"Business OS already exists: {business_os_id}")
+            previous = self._snapshot()
             self._state["business_os"].insert(0, business)
             event = self._append_event_locked(
                 {
@@ -181,7 +208,11 @@ class NativeDashboardStore:
                     "business_os": business,
                 }
             )
-            self._write_state(self._state)
+            try:
+                self._persist_locked()
+            except Exception:
+                self._state = previous
+                raise
         if event:
             self.event_bus.publish(event)
         return copy.deepcopy(business)
@@ -193,12 +224,17 @@ class NativeDashboardStore:
             for item in self._state["business_os"]:
                 if str(item.get("id") or "") != business_os_id:
                     continue
+                previous = self._snapshot()
                 for key in ["name", "description", "template", "status", "color", "workspace_id", "business_id", "manager"]:
                     if key in patch and patch[key] is not None:
-                        item[key] = str(patch[key]).strip() or item.get(key)
+                        value = str(patch[key]).strip()
+                        if value:
+                            item[key] = value
                 for leader_key in ["manager", "cto", "cmo", "cro"]:
                     if leader_key in patch:
                         item.setdefault("leadership", {})[leader_key] = str(patch.get(leader_key) or "").strip()
+                item["manager"] = str(item.get("manager") or item.get("leadership", {}).get("manager") or "Workspace Manager").strip() or "Workspace Manager"
+                item.setdefault("leadership", {})["manager"] = item["manager"]
                 item["updated_at"] = now_iso()
                 updated = copy.deepcopy(item)
                 event = self._append_event_locked(
@@ -211,7 +247,11 @@ class NativeDashboardStore:
                         "business_os": item,
                     }
                 )
-                self._write_state(self._state)
+                try:
+                    self._persist_locked()
+                except Exception:
+                    self._state = previous
+                    raise
                 break
         if event:
             self.event_bus.publish(event)
@@ -243,6 +283,9 @@ class NativeDashboardStore:
 
         event: dict[str, Any] | None = None
         with self._lock:
+            if any(str(item.get("id") or "") == task["id"] for item in self._state["tasks"]):
+                raise ValueError(f"Task already exists: {task['id']}")
+            previous = self._snapshot()
             self._state["tasks"].insert(0, task)
             event = self._append_event_locked(
                 {
@@ -253,7 +296,11 @@ class NativeDashboardStore:
                     "message": f'Task created: {task["title"]}',
                 }
             )
-            self._write_state(self._state)
+            try:
+                self._persist_locked()
+            except Exception:
+                self._state = previous
+                raise
         if event:
             self.event_bus.publish(event)
         return self._enrich_task(task)
@@ -265,6 +312,7 @@ class NativeDashboardStore:
             for item in self._state["tasks"]:
                 if str(item.get("id") or "") != task_id:
                     continue
+                previous = self._snapshot()
                 for key in ["title", "description", "priority", "status", "task_type", "assigned_agent_id", "due_date", "workspace_id", "business_id"]:
                     if key in patch:
                         value = patch[key]
@@ -282,7 +330,11 @@ class NativeDashboardStore:
                         "message": f'Task updated: {item.get("title") or task_id}',
                     }
                 )
-                self._write_state(self._state)
+                try:
+                    self._persist_locked()
+                except Exception:
+                    self._state = previous
+                    raise
                 break
         if event:
             self.event_bus.publish(event)
@@ -295,6 +347,7 @@ class NativeDashboardStore:
             for index, item in enumerate(self._state["tasks"]):
                 if str(item.get("id") or "") != task_id:
                     continue
+                previous = self._snapshot()
                 removed = self._state["tasks"].pop(index)
                 event = self._append_event_locked(
                     {
@@ -305,7 +358,11 @@ class NativeDashboardStore:
                         "message": f'Task deleted: {removed.get("title") or task_id}',
                     }
                 )
-                self._write_state(self._state)
+                try:
+                    self._persist_locked()
+                except Exception:
+                    self._state = previous
+                    raise
                 break
         if event:
             self.event_bus.publish(event)
@@ -340,6 +397,15 @@ class NativeDashboardStore:
             raise ValueError("Agent name is required")
         event: dict[str, Any] | None = None
         with self._lock:
+            if any(str(item.get("id") or "") == agent["id"] for item in self._state["agents"]):
+                raise ValueError(f"Agent already exists: {agent['id']}")
+            if agent["gateway_agent_id"] and any(
+                str(item.get("gateway_agent_id") or "") == agent["gateway_agent_id"]
+                and str(item.get("workspace_id") or "default") == agent["workspace_id"]
+                for item in self._state["agents"]
+            ):
+                raise ValueError(f"Gateway agent already imported: {agent['gateway_agent_id']}")
+            previous = self._snapshot()
             self._state["agents"].insert(0, agent)
             event = self._append_event_locked(
                 {
@@ -349,7 +415,11 @@ class NativeDashboardStore:
                     "message": f'Agent created: {agent["name"]}',
                 }
             )
-            self._write_state(self._state)
+            try:
+                self._persist_locked()
+            except Exception:
+                self._state = previous
+                raise
         if event:
             self.event_bus.publish(event)
         return copy.deepcopy(agent)

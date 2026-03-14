@@ -26,6 +26,13 @@ from council_orchestrator import CouncilOrchestrator
 from council_storage import CouncilArtifactStore
 from native_dashboard_backend import NativeDashboardStore
 
+# Compatibility note for the current CL dashboard migration:
+# - Native in-process routes now cover the persisted mission-control surfaces used by
+#   the dashboard UI: tasks, agents, agent import/discovery, events/history, and
+#   the mission-control SSE stream under /api/mission-control/api/*, plus /api/business-os.
+# - Any other /api/mission-control/api/* path is still forwarded to the upstream
+#   Mission Control service via the proxy helpers below.
+
 
 def parse_allowed_gateway_ports(raw: str | None) -> set[int]:
     if not raw:

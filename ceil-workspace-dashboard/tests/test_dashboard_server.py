@@ -256,6 +256,39 @@ class DashboardServerTests(unittest.TestCase):
         self.assertTrue(any(item["id"] == "default" for item in body["items"]))
         self.assertEqual(body["items"][0]["name"], "Default Business OS")
 
+    def test_corrupt_native_state_is_quarantined_and_reseeded(self):
+        corrupt_path = self.root / "corrupt-native-state.json"
+        corrupt_path.write_text('{"tasks": [', encoding="utf-8")
+
+        store = dashboard_server.NativeDashboardStore(corrupt_path)
+
+        self.assertEqual(store.list_tasks("default"), [])
+        self.assertTrue(any(item["id"] == "default" for item in store.list_business_os()))
+        quarantined = list(self.root.glob("corrupt-native-state.corrupt-*.json"))
+        self.assertEqual(len(quarantined), 1)
+        self.assertEqual(quarantined[0].read_text(encoding="utf-8"), '{"tasks": [')
+        repaired = json.loads(corrupt_path.read_text(encoding="utf-8"))
+        self.assertIn("business_os", repaired)
+        self.assertIn("events", repaired)
+
+    def test_native_store_rolls_back_in_memory_when_persist_fails(self):
+        store = dashboard_server.NativeDashboardStore(self.root / "rollback-native-state.json")
+        original = store.list_tasks("default")
+        original_write_state = store._write_state
+
+        def fail_once(_state):
+            store._write_state = original_write_state
+            raise OSError("disk full")
+
+        store._write_state = fail_once
+
+        with self.assertRaises(OSError):
+            store.create_task({"id": "task-rollback", "title": "Rollback me", "workspace_id": "default"})
+
+        self.assertEqual(store.list_tasks("default"), original)
+        persisted = json.loads((self.root / "rollback-native-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(persisted["tasks"], [])
+
     def test_native_task_agent_event_crud_uses_existing_mission_control_paths(self):
         server = self.make_dashboard()
         created_agent = json.loads(
@@ -295,6 +328,44 @@ class DashboardServerTests(unittest.TestCase):
         self.assertTrue(any(event["type"] == "task_created" for event in listed_events))
         self.assertTrue(delete_resp["ok"])
         self.assertEqual(len(RecordingMissionControlHandler.calls), 0)
+
+    def test_native_create_rejects_duplicate_task_ids(self):
+        server = self.make_dashboard()
+        payload = {"id": "task-duplicate", "title": "First task", "workspace_id": "default"}
+        self.request(server, path="/api/mission-control/api/tasks", method="POST", payload=payload).read()
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.request(server, path="/api/mission-control/api/tasks", method="POST", payload=payload)
+
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"]["message"], "Task already exists: task-duplicate")
+
+    def test_native_business_os_patch_ignores_blank_required_updates(self):
+        server = self.make_dashboard()
+        created = json.loads(
+            self.request(
+                server,
+                path="/api/business-os",
+                method="POST",
+                payload={"id": "ops-core", "name": "Ops Core", "manager": "Nova", "workspace_id": "default"},
+            ).read().decode("utf-8")
+        )
+
+        updated = json.loads(
+            self.request(
+                server,
+                path="/api/business-os/ops-core",
+                method="PATCH",
+                payload={"name": "   ", "status": "  ", "manager": "  ", "cto": "Kaseki"},
+            ).read().decode("utf-8")
+        )
+
+        self.assertEqual(updated["name"], created["name"])
+        self.assertEqual(updated["status"], created["status"])
+        self.assertEqual(updated["manager"], created["manager"])
+        self.assertEqual(updated["leadership"]["manager"], created["manager"])
+        self.assertEqual(updated["leadership"]["cto"], "Kaseki")
 
     def test_proxy_forwards_with_same_origin_fallback_and_main_token(self):
         server = self.make_dashboard()
