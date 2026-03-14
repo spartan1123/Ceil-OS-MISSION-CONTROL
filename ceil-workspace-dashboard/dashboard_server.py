@@ -55,30 +55,25 @@ DEFAULT_TOOLS_URL = "http://127.0.0.1:18789/tools/invoke"
 DEFAULT_MISSION_CONTROL_URL = "http://127.0.0.1:4000"
 DEFAULT_MISSION_CONTROL_ENV_PATH = "/root/.openclaw/workspace/autensa/.env.local"
 DEFAULT_COUNCIL_ARTIFACT_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.council-artifacts"
-DEFAULT_ALLOWED_GATEWAY_PORTS = {18789, 19001, 19011, 19021, 19031, 19041, 19051, 19061, 19071, 19081, 19091, 19101, 19111}
+DEFAULT_ALLOWED_GATEWAY_PORTS = {18789, 19001, 19011, 19031, 19051, 19081, 19091, 19101, 19111}
 DEFAULT_PORT_CONFIG_MAP = {
+    18789: "/root/.openclaw/openclaw.json",
     19001: "/root/.openclaw/instances/workspace-manager.json",
     19011: "/root/.openclaw/instances/provisioning-architect.json",
-    19021: "/root/.openclaw/instances/security-compliance.json",
     19031: "/root/.openclaw/instances/reliability-sre.json",
-    19041: "/root/.openclaw/instances/cost-model-governor.json",
     19051: "/root/.openclaw/instances/quality-auditor.json",
-    19061: "/root/.openclaw/instances/os-monitor-template.json",
-    19071: "/root/.openclaw/instances/workspace-orchestrator.json",
     19081: "/root/.openclaw/instances/os-monitor.json",
     19091: "/root/.openclaw/instances/research-search.json",
     19101: "/root/.openclaw/instances/senku-ishigami.json",
     19111: "/root/.openclaw/instances/ariana.json",
 }
 DEFAULT_PARTICIPANT_TO_SLUG = {
+    "Ceil": "main",
+    "Workspace Orchestrator": "main",
     "Workspace Manager": "workspace-manager",
     "Provisioning Architect": "provisioning-architect",
-    "Security & Compliance": "security-compliance",
     "Reliability / SRE": "reliability-sre",
-    "Cost & Model Governor": "cost-model-governor",
     "Quality Auditor": "quality-auditor",
-    "OS Monitor Template": "os-monitor-template",
-    "Workspace Orchestrator": "workspace-orchestrator",
     "OS Monitor": "os-monitor",
     "Research Search": "research-search",
     "Senku Ishigami": "senku-ishigami",

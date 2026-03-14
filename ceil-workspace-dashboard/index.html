@@ -1829,11 +1829,11 @@
           aliases: ["senku ishigami", "senku-ishigami", "senku_ishigami", "senku"],
         },
         {
-          emoji: "🧩",
-          name: "Workspace Orchestrator",
-          subtitle: "Workflow Coordination",
+          emoji: "👾",
+          name: "Ceil",
+          subtitle: "Top-Level Orchestrator",
           color: "#6366F1",
-          aliases: ["workspace orchestrator", "workspace-orchestrator", "workspace_orchestrator", "orchestrator"],
+          aliases: ["ceil", "workspace orchestrator", "workspace-orchestrator", "workspace_orchestrator", "orchestrator", "main"],
         },
         {
           emoji: "🏗️",
@@ -1843,25 +1843,11 @@
           aliases: ["provisioning architect", "provisioning-architect", "provisioning_architect", "provisioning lead", "provisioning"],
         },
         {
-          emoji: "🛡️",
-          name: "Security & Compliance",
-          subtitle: "Security and Policy",
-          color: "#EF4444",
-          aliases: ["security & compliance", "security and compliance", "security compliance", "security/compliance", "security-compliance", "security_compliance"],
-        },
-        {
           emoji: "🛰️",
           name: "Reliability / SRE",
           subtitle: "Operations Reliability",
           color: "#10B981",
           aliases: ["reliability / sre", "reliability sre", "reliability-sre", "reliability_sre", "reliability", "sre"],
-        },
-        {
-          emoji: "💰",
-          name: "Cost & Model Governor",
-          subtitle: "Budget and Model Control",
-          color: "#F59E0B",
-          aliases: ["cost & model governor", "cost model governor", "cost-model-governor", "cost_model_governor", "model governor", "cost governor"],
         },
         {
           emoji: "✅",
@@ -1876,13 +1862,6 @@
           subtitle: "Per-OS Monitoring",
           color: "#14B8A6",
           aliases: ["os monitor", "os-monitor", "os_monitor", "monitor", "system monitor"],
-        },
-        {
-          emoji: "📋",
-          name: "OS Monitor Template",
-          subtitle: "Template for Monitors",
-          color: "#0D9488",
-          aliases: ["os monitor template", "os-monitor-template", "os_monitor_template"],
         },
         {
           emoji: "🔍",
@@ -1902,51 +1881,42 @@
 
       const AGENT_RUNTIME_CONFIG = {
         canonicalSlugs: [
-          "workspace-orchestrator",
+          "main",
           "workspace-manager",
           "senku-ishigami",
           "provisioning-architect",
-          "security-compliance",
           "reliability-sre",
-          "cost-model-governor",
           "quality-auditor",
           "os-monitor",
-          "os-monitor-template",
           "research-search",
           "ariana"
         ],
         participantToSlug: {
-          "Workspace Orchestrator": "workspace-orchestrator",
+          "Ceil": "main",
+          "Workspace Orchestrator": "main",
           "Workspace Manager": "workspace-manager",
           "Senku Ishigami": "senku-ishigami",
           "Provisioning Architect": "provisioning-architect",
-          "Security & Compliance": "security-compliance",
           "Reliability / SRE": "reliability-sre",
-          "Cost & Model Governor": "cost-model-governor",
           "Quality Auditor": "quality-auditor",
           "OS Monitor": "os-monitor",
-          "OS Monitor Template": "os-monitor-template",
           "Research Search": "research-search",
           "Ariana": "ariana"
         },
         routingMatrix: {
-          coordination: { primary: "workspace-manager", escalation: "workspace-orchestrator" },
+          coordination: { primary: "workspace-manager", escalation: "main" },
           provisioning: { primary: "provisioning-architect", escalation: "workspace-manager" },
-          security: { primary: "security-compliance", escalation: "workspace-manager" },
           reliability: { primary: "reliability-sre", escalation: "workspace-manager" },
-          cost: { primary: "cost-model-governor", escalation: "workspace-manager" },
           quality: { primary: "quality-auditor", escalation: "workspace-manager" },
           monitor: { primary: "os-monitor", escalation: "reliability-sre" },
           research: { primary: "senku-ishigami", escalation: "workspace-manager" },
         },
         readyRules: {
-          "workspace-orchestrator": "Routed packet complete + downstream assignment confirmed.",
+          "main": "Routed packet complete + downstream assignment confirmed.",
           "workspace-manager": "Integrated decision packet produced.",
           "senku-ishigami": "Evidence-backed synthesis delivered with assumptions and risks.",
           "provisioning-architect": "Sequenced implementation plan + dependency handoff complete.",
-          "security-compliance": "Security findings + remediation severity reported.",
           "reliability-sre": "Rollback + failure handling guardrails defined.",
-          "cost-model-governor": "Cost impact + model lane recommendation delivered.",
           "quality-auditor": "Explicit pass/fail gate with blockers listed.",
           "os-monitor": "Monitoring verdict with anomaly urgency recorded.",
         },
@@ -2281,11 +2251,11 @@
       // TIER 1: You (CEO) — rendered statically in HTML
       // TIER 2: Orchestrator
       const TIER2_ORCHESTRATOR = {
-        agentName: "Workspace Orchestrator",
+        agentName: "Ceil",
         accent: "#6366F1",
         role: "TIER 2 · Chief Orchestrator",
         description: "Classifies intent → routes to correct specialist chain",
-        delegationNote: "Routes by task nature · Bypasses if critical",
+        delegationNote: "Routes by task nature · Delegates specialist execution",
       };
 
       // TIER 3: Workspace Manager (COO)
@@ -2311,12 +2281,6 @@
           description: "OS provisioning · Config management · Deployment reliability",
         },
         {
-          agentName: "Security & Compliance",
-          accent: "#EF4444",
-          role: "Security Lead",
-          description: "Token handling · Policy enforcement · Compliance gate",
-        },
-        {
           agentName: "Reliability / SRE",
           accent: "#10B981",
           role: "Reliability Lead",
@@ -2327,12 +2291,6 @@
           accent: "#7C3AED",
           role: "Quality Lead",
           description: "Release readiness · Coherence checks · Audit reports",
-        },
-        {
-          agentName: "Cost & Model Governor",
-          accent: "#F59E0B",
-          role: "Economics Lead",
-          description: "Model lane budgeting · Cost tracking · Resource governance",
         },
       ];
 
@@ -3168,14 +3126,11 @@
 
       const RUNTIME_PROXY_PATH = "/api/tools/invoke";
       const AGENT_GATEWAY_PORT_MAP = {
+        "main": 18789,
         "workspace-manager": 19001,
         "provisioning-architect": 19011,
-        "security-compliance": 19021,
         "reliability-sre": 19031,
-        "cost-model-governor": 19041,
         "quality-auditor": 19051,
-        "os-monitor-template": 19061,
-        "workspace-orchestrator": 19071,
         "os-monitor": 19081,
         "research-search": 19091,
         "senku-ishigami": 19101,
