@@ -123,7 +123,7 @@
       };
     }
 
-    if (normalized.includes("complete")) {
+    if (isCompletedLikeStatus(raw)) {
       return {
         label: raw || "Completed",
         klass: "border border-emerald-400/45 bg-emerald-500/20 text-emerald-200",

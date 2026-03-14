@@ -60,10 +60,19 @@ test('createAgentResolver matches direct aliases and fuzzy log names', () => {
   assert.equal(resolver.resolveAgentFromLogName('totally unknown'), null);
 });
 
-test('getStatusBadge classifies failed, completed, and fallback states', () => {
+test('getStatusBadge classifies failed, completion-like, and fallback states', () => {
   assert.equal(utils.getStatusBadge('failed').label, 'failed');
   assert.match(utils.getStatusBadge('failed').klass, /red/);
   assert.match(utils.getStatusBadge('completed').klass, /emerald/);
+
+  for (const status of ['success', 'done', 'resolved', 'PASS']) {
+    assert.match(
+      utils.getStatusBadge(status).klass,
+      /emerald/,
+      `${status} should render with a success badge`,
+    );
+  }
+
   assert.match(utils.getStatusBadge('queued').klass, /slate/);
 });
 

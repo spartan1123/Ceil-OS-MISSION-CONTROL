@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const dashboardDom = require('../dashboard-dom.js');
+const utils = require('../dashboard-utils.js');
 
 function fakeElement({ active = false } = {}) {
   return {
@@ -109,6 +110,32 @@ test('renderRecentActivity and renderModelUsage expose empty states', () => {
 
   assert.match(recentActivityEl.innerHTML, /No data yet/);
   assert.match(modelUsageBodyEl.innerHTML, /No data yet/);
+});
+
+test('renderRecentActivity uses success-colored badges for completion-like statuses', () => {
+  for (const status of ['success', 'done', 'resolved', 'PASS']) {
+    const recentActivityEl = fakeElement();
+
+    dashboardDom.renderRecentActivity(
+      { recentActivityEl },
+      [
+        {
+          agent_name: 'Senku Ishigami',
+          task_description: `Handled ${status}`,
+          model_used: 'gpt-5.4',
+          status,
+          created_at: '2026-03-08T17:00:00Z',
+        },
+      ],
+      {
+        ...deps,
+        getStatusBadge: utils.getStatusBadge,
+      },
+    );
+
+    assert.match(recentActivityEl.innerHTML, /bg-emerald-500\/20/, `${status} should render as success`);
+    assert.match(recentActivityEl.innerHTML, new RegExp(`>\\s*${status}\\s*<`));
+  }
 });
 
 test('renderOrg populates org metrics and node HTML and wires toggles', () => {
