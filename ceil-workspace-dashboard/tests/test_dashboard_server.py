@@ -289,6 +289,49 @@ class DashboardServerTests(unittest.TestCase):
         persisted = json.loads((self.root / "rollback-native-state.json").read_text(encoding="utf-8"))
         self.assertEqual(persisted["tasks"], [])
 
+    def test_native_store_rolls_back_business_os_update_when_persist_fails(self):
+        state_path = self.root / "rollback-business-os-state.json"
+        store = dashboard_server.NativeDashboardStore(state_path)
+        created = store.create_business_os({"id": "ops-core", "name": "Ops Core", "manager": "Nova", "workspace_id": "default"})
+        original_write_state = store._write_state
+
+        def fail_once(_state):
+            store._write_state = original_write_state
+            raise OSError("disk full")
+
+        store._write_state = fail_once
+
+        with self.assertRaises(OSError):
+            store.update_business_os(created["id"], {"name": "Ops Core Prime", "manager": "Vega"})
+
+        current = next(item for item in store.list_business_os() if item["id"] == created["id"])
+        self.assertEqual(current["name"], "Ops Core")
+        self.assertEqual(current["manager"], "Nova")
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        persisted_item = next(item for item in persisted["business_os"] if item["id"] == created["id"])
+        self.assertEqual(persisted_item["name"], "Ops Core")
+        self.assertEqual(persisted_item["manager"], "Nova")
+
+    def test_native_store_rolls_back_task_delete_when_persist_fails(self):
+        state_path = self.root / "rollback-delete-task-state.json"
+        store = dashboard_server.NativeDashboardStore(state_path)
+        created = store.create_task({"id": "task-delete-rollback", "title": "Keep me", "workspace_id": "default"})
+        original_write_state = store._write_state
+
+        def fail_once(_state):
+            store._write_state = original_write_state
+            raise OSError("disk full")
+
+        store._write_state = fail_once
+
+        with self.assertRaises(OSError):
+            store.delete_task(created["id"])
+
+        remaining = store.list_tasks("default")
+        self.assertTrue(any(item["id"] == created["id"] for item in remaining))
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertTrue(any(item["id"] == created["id"] for item in persisted["tasks"]))
+
     def test_native_task_agent_event_crud_uses_existing_mission_control_paths(self):
         server = self.make_dashboard()
         created_agent = json.loads(
@@ -494,6 +537,20 @@ class DashboardServerTests(unittest.TestCase):
 
         self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
         self.assertTrue("business_os_seeded" in body or "task_created" in body)
+
+    def test_unsupported_mission_control_route_still_proxies_upstream(self):
+        server = self.make_dashboard()
+        with self.request(
+            server,
+            path="/api/mission-control/api/not-a-real-endpoint/child?mode=compat",
+            headers={"Origin": f"http://127.0.0.1:{server.server_address[1]}"},
+            method="GET",
+        ) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body[0]["id"], "task-1")
+        self.assertEqual(RecordingMissionControlHandler.calls[-1]["path"], "/api/not-a-real-endpoint/child?mode=compat")
 
     def test_council_start_requires_topic(self):
         server = self.make_dashboard()
