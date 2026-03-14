@@ -16,19 +16,20 @@ That logic currently lives behind the Mission Control proxy target, which defaul
 
 That means the user-facing CL dashboard stack serves the owned shell here, but its Mission Control API behavior is delegated to the backend configured at `127.0.0.1:4000`.
 
-## Evidence in the backend currently supplying that behavior
+## Evidence in the backend wired behind that proxy boundary
 
 The external sync attribution path exists in Autensa, not in this repo:
 
-- `/root/.openclaw/workspace/autensa/src/app/api/openclaw/progress/route.ts`
-- `/root/.openclaw/workspace/autensa/src/lib/external-actor-resolution.ts`
-- `/root/.openclaw/workspace/autensa/tests/external-work-sync-bridge.test.ts`
+- Repo: `autensa`
+- API entrypoint: `/root/.openclaw/workspace/autensa/src/app/api/openclaw/progress/route.ts`
+- Resolution helper: `/root/.openclaw/workspace/autensa/src/lib/external-actor-resolution.ts`
+- Regression coverage: `/root/.openclaw/workspace/autensa/tests/external-work-sync-bridge.test.ts`
 
-That backend contains the hardened `main-orchestrator` alias coverage, unresolved-actor safety, and ambiguous-match refusal reviewed in donor commit `4ad08c2`.
+Those paths are the donor/reference implementation for external progress attribution. The previously reviewed donor fix is commit `4ad08c2`, which hardened `main-orchestrator` alias handling, unresolved-actor safety, and ambiguous-match refusal in that backend flow.
 
 ## Scope claim
 
-This boundary only supports the narrower claim that the current live stack inherits the improved **external sync attribution** behavior through the proxied Mission Control backend. It does **not** mean every stale visibility path in the CL dashboard is solved.
+This boundary supports the narrower architectural claim that the CL dashboard shell here is wired to rely on a proxied Mission Control backend, and can inherit improved **external sync attribution** behavior from that backend when it is the service configured at `127.0.0.1:4000`. It does **not** prove a specific live deployment/runtime state, and it does **not** mean every stale visibility path in the CL dashboard is solved.
 
 ## Remaining gap
 
