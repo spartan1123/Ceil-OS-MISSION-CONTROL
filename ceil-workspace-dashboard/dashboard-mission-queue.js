@@ -70,6 +70,8 @@
 
   function filterTasks(tasks, filters) {
     return tasks.filter((task) => {
+      // Exclude runtime-derived synthetic tasks (live session noise)
+      if (task.runtime_derived === true || task.synthetic === true || String(task.source || "") === "runtime") return false;
       if (filters.assignee && String(task.assigned_agent_id || "") !== filters.assignee) return false;
       if (filters.priority && String(task.priority || "") !== filters.priority) return false;
       if (filters.status && String(task.status || "") !== filters.status) return false;
@@ -79,6 +81,10 @@
   }
 
   function inferAgentActivityState(agent, tasks) {
+    // Exclude runtime-derived synthetic agents from activity counts
+    if (agent.runtime_derived === true || agent.synthetic === true || String(agent.source || "").toLowerCase() === "runtime") {
+      return AGENT_LANES.standby;
+    }
     const status = String(agent && (agent.effective_status || agent.status) ? (agent.effective_status || agent.status) : "").toLowerCase();
     const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent && agent.id ? agent.id : "")).length;
     if (["working", "active", "busy", "running", "in_progress"].includes(status) || assignedCount > 0) {
@@ -397,13 +403,16 @@
     }
 
     function renderAgentsRail(tasks) {
+      // Filter out runtime-derived synthetic agents from display
+      const realAgents = state.agents.filter((agent) => !(agent.runtime_derived === true || agent.synthetic === true || String(agent.source || "").toLowerCase() === "runtime"));
+      
       const laneCounts = {
-        [AGENT_LANES.all]: state.agents.length,
-        [AGENT_LANES.working]: filterAgentsByLane(state.agents, AGENT_LANES.working, tasks).length,
-        [AGENT_LANES.standby]: filterAgentsByLane(state.agents, AGENT_LANES.standby, tasks).length,
+        [AGENT_LANES.all]: realAgents.length,
+        [AGENT_LANES.working]: filterAgentsByLane(realAgents, AGENT_LANES.working, tasks).length,
+        [AGENT_LANES.standby]: filterAgentsByLane(realAgents, AGENT_LANES.standby, tasks).length,
       };
 
-      const agents = filterAgentsByLane(state.agents, state.agentLane, tasks)
+      const agents = filterAgentsByLane(realAgents, state.agentLane, tasks)
         .sort((a, b) => {
           const aAssigned = tasks.filter((task) => String(task.assigned_agent_id || "") === String(a.id)).length;
           const bAssigned = tasks.filter((task) => String(task.assigned_agent_id || "") === String(b.id)).length;
