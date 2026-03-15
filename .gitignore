@@ -15,5 +15,8 @@ tools/
 __pycache__/
 *.pyc
 
+# Dashboard local runtime state
+ceil-workspace-dashboard/.native-dashboard/
+
 # OS/editor noise
 .DS_Store
