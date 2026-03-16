@@ -27,11 +27,7 @@ test("filterTasks excludes runtime source with case-insensitive matching", () =>
   const filtered = missionQueue.filterTasks(tasks, {});
   const ids = filtered.map((t) => t.id);
 
-  // Note: Current implementation uses case-sensitive match for tasks
-  // but case-insensitive for agents. This is an inconsistency.
-  // Expected behavior (consistent with agents): ["3"]
-  // Current behavior: ["2", "3"]
-  assert.deepEqual(ids, ["2", "3"], "Current implementation - case-sensitive; should be fixed to match agent filtering");
+  assert.deepEqual(ids, ["3"], "Should exclude runtime-source tasks regardless of source casing");
 });
 
 test("inferAgentActivityState returns standby for runtime-derived agents", () => {

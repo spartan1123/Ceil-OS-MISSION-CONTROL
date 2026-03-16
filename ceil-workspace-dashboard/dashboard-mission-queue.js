@@ -68,10 +68,19 @@
     };
   }
 
+  function isSyntheticRuntimeTask(task) {
+    const source = String(task && task.source ? task.source : "").toLowerCase();
+    return Boolean(task && (task.runtime_derived || task.synthetic || source === "runtime"));
+  }
+
+  function isSyntheticRuntimeAgent(agent) {
+    const source = String(agent && agent.source ? agent.source : "").toLowerCase();
+    return Boolean(agent && (agent.runtime_derived || agent.synthetic || source === "runtime"));
+  }
+
   function filterTasks(tasks, filters) {
     return tasks.filter((task) => {
-      // Exclude runtime-derived synthetic tasks (live session noise)
-      if (task.runtime_derived === true || task.synthetic === true || String(task.source || "") === "runtime") return false;
+      if (isSyntheticRuntimeTask(task)) return false;
       if (filters.assignee && String(task.assigned_agent_id || "") !== filters.assignee) return false;
       if (filters.priority && String(task.priority || "") !== filters.priority) return false;
       if (filters.status && String(task.status || "") !== filters.status) return false;
@@ -81,8 +90,7 @@
   }
 
   function inferAgentActivityState(agent, tasks) {
-    // Exclude runtime-derived synthetic agents from activity counts
-    if (agent.runtime_derived === true || agent.synthetic === true || String(agent.source || "").toLowerCase() === "runtime") {
+    if (isSyntheticRuntimeAgent(agent)) {
       return AGENT_LANES.standby;
     }
     const status = String(agent && (agent.effective_status || agent.status) ? (agent.effective_status || agent.status) : "").toLowerCase();
@@ -96,7 +104,7 @@
   function getAgentSourceMeta(agent) {
     const source = String(agent && agent.source ? agent.source : "").toLowerCase();
     const gatewayAgentId = String(agent && agent.gateway_agent_id ? agent.gateway_agent_id : "").trim();
-    if (source === "gateway" || gatewayAgentId) {
+    if (source === "gateway" || source === "runtime" || gatewayAgentId) {
       return {
         label: "Gateway-linked",
         detail: gatewayAgentId || "Imported from gateway",
@@ -403,8 +411,7 @@
     }
 
     function renderAgentsRail(tasks) {
-      // Filter out runtime-derived synthetic agents from display
-      const realAgents = state.agents.filter((agent) => !(agent.runtime_derived === true || agent.synthetic === true || String(agent.source || "").toLowerCase() === "runtime"));
+      const realAgents = state.agents.slice();
       
       const laneCounts = {
         [AGENT_LANES.all]: realAgents.length,
