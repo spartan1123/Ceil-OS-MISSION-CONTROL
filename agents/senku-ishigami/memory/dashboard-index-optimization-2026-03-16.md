@@ -1,0 +1,28 @@
+- date: 2026-03-16
+- task: Analyze Ceil Workspace Dashboard index.html bundle size and load-performance bloat.
+- assumptions:
+  - Measurements taken from /root/.openclaw/workspace/ceil-workspace-dashboard on the live repo checkout.
+  - Raw and gzip sizes were measured directly from index.html.
+- implementation decisions:
+  - Use direct file-size measurement and inline script inventory rather than browser-only heuristics.
+  - Treat large inline scripts as the primary optimization target because they hurt cacheability and CSP hardening.
+- verification evidence:
+  - index.html raw size: 240115 bytes (~234.5 KB)
+  - index.html gzip size: 45992 bytes (~44.9 KB)
+  - inline script bytes total: 159332 bytes
+  - largest inline blocks: 76258, 26903, 23933 bytes
+  - script tags: 15 total, 8 inline
+- implementation findings:
+  - Top bloat source #1: large inline dashboard orchestration block (~76.3 KB)
+  - Top bloat source #2: two additional inline feature blocks (~26.9 KB and ~23.9 KB)
+  - Top bloat source #3: monolithic HTML delivery model causing all inline app logic to be re-downloaded/re-parsed on every HTML change
+- optimization recommendations:
+  - Extract large inline scripts into cacheable external modules; estimated raw HTML reduction ~120-150 KB
+  - Lazy-load non-critical panels (Mission Queue, org chart, council/live-control); estimated initial JS deferral ~80-120 KB
+  - Replace monolithic startup with tab/view-triggered initialization to reduce first-load parse/execute work; estimated 15-30% faster time-to-interactive on repeatable dashboard loads
+- unresolved risks:
+  - Exact TTI savings need browser-level profiling on production hardware/network.
+- follow-up actions:
+  - Split index.html inline scripts into named JS modules.
+  - Add dynamic imports per tab/view.
+  - Re-measure first paint and interaction latency after modularization.
