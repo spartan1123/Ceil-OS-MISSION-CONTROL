@@ -1,5 +1,9 @@
 # HEARTBEAT.md
 
-# Keep this file empty (or with only comments) to skip heartbeat API calls.
+Heartbeats are currently disabled by the user.
 
-# Add tasks below when you want the agent to check something periodically.
+On any heartbeat poll, do not perform checks or background work.
+Reply exactly:
+HEARTBEAT_OK
+
+Only resume heartbeat tasks after the user explicitly asks to re-enable them.

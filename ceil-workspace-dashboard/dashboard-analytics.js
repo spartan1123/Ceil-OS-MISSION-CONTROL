@@ -130,6 +130,95 @@
     };
   }
 
+  function summarizeMissionControlSnapshot({
+    agents,
+    tasks,
+    events,
+    now = new Date(),
+  }) {
+    const safeAgents = Array.isArray(agents) ? agents : [];
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
+    const safeEvents = Array.isArray(events) ? events : [];
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const weekStart = new Date(dayStart);
+    const day = weekStart.getDay();
+    const mondayOffset = day === 0 ? 6 : day - 1;
+    weekStart.setDate(weekStart.getDate() - mondayOffset);
+
+    const agentSummaries = safeAgents.map((agent, index) => ({
+      ...agent,
+      emoji: agent.emoji || agent.avatar_emoji || "🤖",
+      color: agent.color || ["#4F46E5", "#EC4899", "#06B6D4", "#10B981", "#7C3AED", "#F59E0B", "#3B82F6"][index % 7],
+      subtitle: agent.subtitle || agent.role || agent.description || "Mission specialist",
+      latest: null,
+      tasksToday: 0,
+    }));
+    const summaryById = new Map(agentSummaries.map((agent) => [String(agent.id || ""), agent]));
+
+    for (const task of safeTasks) {
+      const assignedId = String(task && task.assigned_agent_id ? task.assigned_agent_id : "");
+      if (!assignedId) continue;
+      const summary = summaryById.get(assignedId);
+      if (!summary) continue;
+      const updatedAt = new Date(task.updated_at || task.created_at || 0);
+      if (Number.isNaN(updatedAt.getTime())) continue;
+      if (updatedAt >= dayStart && String(task.status || "").toLowerCase() !== "done") {
+        summary.tasksToday += 1;
+      }
+      if (!summary.latest) {
+        summary.latest = {
+          task_description: task.title || task.description || "Live mission",
+          model_used: task.model || summary.model || null,
+          status: task.status || "active",
+          created_at: task.updated_at || task.created_at || null,
+        };
+      }
+    }
+
+    for (const event of safeEvents) {
+      const agentId = String(event && event.agent_id ? event.agent_id : "");
+      const summary = summaryById.get(agentId);
+      if (!summary || summary.latest) continue;
+      summary.latest = {
+        task_description: event.message || event.type || "Live mission event",
+        model_used: event?.metadata?.model || summary.model || null,
+        status: event.type || "active",
+        created_at: event.created_at || null,
+      };
+    }
+
+    const totalToday = agentSummaries.reduce((sum, agent) => sum + Number(agent.tasksToday || 0), 0);
+    const weekTasks = safeTasks.filter((task) => {
+      const updatedAt = new Date(task.updated_at || task.created_at || 0);
+      return !Number.isNaN(updatedAt.getTime()) && updatedAt >= weekStart;
+    });
+    const successfulWeek = weekTasks.filter((task) => String(task.status || "").toLowerCase() === "done").length;
+
+    return {
+      agentSummaries,
+      totalToday,
+      totalWeek: weekTasks.length,
+      successfulWeek,
+      successRate: computeSuccessRate(weekTasks.length, successfulWeek),
+      mostActive: formatMostActive(agentSummaries),
+      recentLogs: safeEvents.slice(0, 50).map((event) => ({
+        agent_name: event.agent_name || summaryById.get(String(event.agent_id || ""))?.name || "Unknown Agent",
+        task_description: event.message || event.type || "Live mission event",
+        model_used: event?.metadata?.model || null,
+        status: event.type || "active",
+        created_at: event.created_at || null,
+      })),
+      orgStatsByName: new Map(agentSummaries.map((agent) => [agent.name, { tasksToday: agent.tasksToday, latest: agent.latest }])),
+      orgMetrics: {
+        activeToday: agentSummaries.filter((agent) => agent.tasksToday > 0 || String(agent.effective_status || agent.status || "").toLowerCase() === "active").length,
+        totalToday,
+        totalWeek: weekTasks.length,
+        successRate: computeSuccessRate(weekTasks.length, successfulWeek),
+      },
+    };
+  }
+
   return {
     buildDefaultAgentSummaries,
     chooseLatestMeaningfulEntry,
@@ -137,5 +226,6 @@
     formatMostActive,
     summarizeAgentLogsForAgents,
     buildOrgChartStats,
+    summarizeMissionControlSnapshot,
   };
 });

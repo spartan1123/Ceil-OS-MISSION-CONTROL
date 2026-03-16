@@ -259,6 +259,12 @@
       sse: null,
       started: false,
       loading: false,
+      renderCache: {
+        contextKey: "",
+        context: null,
+        boardHtml: "",
+        agentsHtml: "",
+      },
     };
 
     const refs = {
@@ -329,10 +335,91 @@
       refs.bannerEl.style.color = tone === "error" ? "#FCA5A5" : "#BAE6FD";
     }
 
-    function assigneeName(task) {
+    function buildRenderContext(visibleTasks) {
+      const taskSignature = visibleTasks.map((task) => [task.id, task.status, task.assigned_agent_id || "", task.updated_at || "", task.priority || ""].join(":" )).join("|");
+      const agentSignature = state.agents.map((agent) => [agent.id, agent.status || "", agent.effective_status || "", agent.updated_at || ""].join(":")).join("|");
+      const feedSignature = state.feedEvents.slice(0, 80).map((event) => [event.id || "", event.type || "", event.created_at || ""].join(":")).join("|");
+      const contextKey = [taskSignature, agentSignature, state.agentLane, state.sideView, state.feedFilter, feedSignature].join("::");
+      if (state.renderCache.contextKey === contextKey && state.renderCache.context) {
+        return state.renderCache.context;
+      }
+
+      const agentNameById = new Map(state.agents.map((agent) => [String(agent.id || ""), String(agent.name || "Unknown Agent")]));
+      const assignedCountByAgentId = new Map();
+      const tasksByStatus = new Map(QUEUE_COLUMNS.map((column) => [column.id, []]));
+      let open = 0;
+      let active = 0;
+      let done = 0;
+      let hasPlanningDispatchError = false;
+
+      visibleTasks.forEach((task) => {
+        const assignedAgentId = String(task.assigned_agent_id || "");
+        assignedCountByAgentId.set(assignedAgentId, (assignedCountByAgentId.get(assignedAgentId) || 0) + (assignedAgentId ? 1 : 0));
+        if (tasksByStatus.has(task.status)) {
+          tasksByStatus.get(task.status).push(task);
+        }
+        if (!["done", "verification"].includes(task.status)) open += 1;
+        if (["assigned", "in_progress", "testing", "review"].includes(task.status)) active += 1;
+        if (task.status === "done") done += 1;
+        if (task.planning_dispatch_error) hasPlanningDispatchError = true;
+      });
+
+      const total = visibleTasks.length || 1;
+      const summary = {
+        total,
+        open,
+        active,
+        done,
+        openPct: `${Math.round((open / total) * 100)}%`,
+        activePct: `${Math.round((active / total) * 100)}%`,
+        donePct: `${Math.round((done / total) * 100)}%`,
+      };
+
+      const laneCounts = {
+        [AGENT_LANES.all]: state.agents.length,
+        [AGENT_LANES.working]: 0,
+        [AGENT_LANES.standby]: 0,
+      };
+      const agentLaneById = new Map();
+      state.agents.forEach((agent) => {
+        const lane = inferAgentActivityState(agent, visibleTasks);
+        agentLaneById.set(String(agent.id || ""), lane);
+        laneCounts[lane] += 1;
+      });
+
+      const feedCounts = {
+        all: state.feedEvents.length,
+        tasks: 0,
+        agents: 0,
+      };
+      state.feedEvents.forEach((event) => {
+        const lane = feedLaneForEvent(event);
+        if (lane === "tasks") feedCounts.tasks += 1;
+        if (lane === "agents") feedCounts.agents += 1;
+      });
+      const filteredFeedEvents = state.feedFilter === "all"
+        ? state.feedEvents.slice(0, 80)
+        : state.feedEvents.filter((event) => feedLaneForEvent(event) === state.feedFilter).slice(0, 80);
+
+      const context = {
+        summary,
+        tasksByStatus,
+        assignedCountByAgentId,
+        agentNameById,
+        laneCounts,
+        agentLaneById,
+        feedCounts,
+        filteredFeedEvents,
+        hasPlanningDispatchError,
+      };
+      state.renderCache.contextKey = contextKey;
+      state.renderCache.context = context;
+      return context;
+    }
+
+    function assigneeName(task, context) {
       if (task.assigned_agent && task.assigned_agent.name) return task.assigned_agent.name;
-      const match = state.agents.find((agent) => agent.id === task.assigned_agent_id);
-      return match ? match.name : "Unassigned";
+      return context.agentNameById.get(String(task.assigned_agent_id || "")) || "Unassigned";
     }
 
     function hydrateFilters() {
@@ -347,8 +434,8 @@
       refs.assigneeFilterEl.value = state.filters.assignee;
     }
 
-    function renderMetrics(tasks) {
-      const summary = summarizeBoard(tasks);
+    function renderMetrics(context) {
+      const summary = context.summary;
       refs.openCountEl.textContent = String(summary.open);
       refs.openPctEl.textContent = summary.openPct;
       refs.activeCountEl.textContent = String(summary.active);
@@ -365,7 +452,7 @@
       } else if (summary.active > summary.done) {
         message = "Execution lanes are busy.";
         theme = { bg: "rgba(245,158,11,.18)", border: "rgba(245,158,11,.45)", text: "#FCD34D" };
-      } else if (tasks.some((task) => task.planning_dispatch_error)) {
+      } else if (context.hasPlanningDispatchError) {
         message = "Some missions need operator attention.";
         theme = { bg: "rgba(239,68,68,.18)", border: "rgba(239,68,68,.45)", text: "#FCA5A5" };
       }
@@ -410,26 +497,22 @@
       return `${Math.max(1, Math.floor(diffMs / day))} day ago`;
     }
 
-    function renderAgentsRail(tasks) {
+    function renderAgentsRail(tasks, context) {
       const realAgents = state.agents.slice();
-      
-      const laneCounts = {
-        [AGENT_LANES.all]: realAgents.length,
-        [AGENT_LANES.working]: filterAgentsByLane(realAgents, AGENT_LANES.working, tasks).length,
-        [AGENT_LANES.standby]: filterAgentsByLane(realAgents, AGENT_LANES.standby, tasks).length,
-      };
+      const laneCounts = context.laneCounts;
 
-      const agents = filterAgentsByLane(realAgents, state.agentLane, tasks)
+      const agents = realAgents
+        .filter((agent) => state.agentLane === AGENT_LANES.all || context.agentLaneById.get(String(agent.id || "")) === state.agentLane)
         .sort((a, b) => {
-          const aAssigned = tasks.filter((task) => String(task.assigned_agent_id || "") === String(a.id)).length;
-          const bAssigned = tasks.filter((task) => String(task.assigned_agent_id || "") === String(b.id)).length;
+          const aAssigned = context.assignedCountByAgentId.get(String(a.id || "")) || 0;
+          const bAssigned = context.assignedCountByAgentId.get(String(b.id || "")) || 0;
           if (bAssigned !== aAssigned) return bAssigned - aAssigned;
           return String(a.name || "").localeCompare(String(b.name || ""));
         });
 
       const listHtml = agents.length
         ? agents.map((agent) => {
-            const assignedCount = tasks.filter((task) => String(task.assigned_agent_id || "") === String(agent.id)).length;
+            const assignedCount = context.assignedCountByAgentId.get(String(agent.id || "")) || 0;
             const statusMeta = getAgentStatusMeta(agent, tasks);
             const sourceMeta = getAgentSourceMeta(agent);
             const role = String(agent.role || agent.specialty || agent.description || "Mission specialist").slice(0, 44);
@@ -453,12 +536,8 @@
           }).join("")
         : '<div class="rounded-xl border border-dashed border-white/12 bg-slate-950/30 px-3 py-6 text-center text-xs text-slate-500">No agents in this lane</div>';
 
-      const feedCounts = {
-        all: state.feedEvents.length,
-        tasks: filterFeedEvents(state.feedEvents, "tasks").length,
-        agents: filterFeedEvents(state.feedEvents, "agents").length,
-      };
-      const feedEvents = filterFeedEvents(state.feedEvents, state.feedFilter).slice(0, 80);
+      const feedCounts = context.feedCounts;
+      const feedEvents = context.filteredFeedEvents;
       const feedHtml = feedEvents.length
         ? feedEvents.map((event) => {
             const icon = feedLaneForEvent(event) === "agents" ? "🤖" : feedLaneForEvent(event) === "tasks" ? "📌" : "🔔";
@@ -513,9 +592,10 @@
 
     function renderBoard() {
       const visibleTasks = filterTasks(state.tasks, state.filters);
+      const context = buildRenderContext(visibleTasks);
       refs.boardEl.style.gridTemplateColumns = `${QUEUE_COLUMNS.map(() => "minmax(250px, 1fr)").join(" ")}`;
-      refs.boardEl.innerHTML = QUEUE_COLUMNS.map((column) => {
-        const tasks = visibleTasks.filter((task) => task.status === column.id);
+      const boardHtml = QUEUE_COLUMNS.map((column) => {
+        const tasks = context.tasksByStatus.get(column.id) || [];
         return `
           <section class="kanban-column flex min-h-[560px] flex-col rounded-2xl border p-3" data-status="${column.id}" style="background:${column.tone};border-color:${column.border};">
             <div class="mb-3 flex items-center justify-between gap-2">
@@ -526,12 +606,20 @@
               <span class="rounded-full border px-2 py-0.5 text-[11px] font-semibold" style="border-color:${column.border};color:${column.chip};">${tasks.length}</span>
             </div>
             <div class="kanban-card-list flex-1 space-y-3">
-              ${tasks.length ? tasks.map((task) => renderCard(task)).join("") : '<div class="rounded-xl border border-dashed border-white/12 bg-slate-950/30 px-3 py-6 text-center text-xs text-slate-500">No missions</div>'}
+              ${tasks.length ? tasks.map((task) => renderCard(task, context)).join("") : '<div class="rounded-xl border border-dashed border-white/12 bg-slate-950/30 px-3 py-6 text-center text-xs text-slate-500">No missions</div>'}
             </div>
           </section>
         `;
       }).join("");
-      refs.agentsRailEl.innerHTML = renderAgentsRail(visibleTasks);
+      const agentsHtml = renderAgentsRail(visibleTasks, context);
+      if (state.renderCache.boardHtml !== boardHtml) {
+        refs.boardEl.innerHTML = boardHtml;
+        state.renderCache.boardHtml = boardHtml;
+      }
+      if (state.renderCache.agentsHtml !== agentsHtml) {
+        refs.agentsRailEl.innerHTML = agentsHtml;
+        state.renderCache.agentsHtml = agentsHtml;
+      }
 
       refs.boardEl.querySelectorAll("[data-task-id]").forEach((card) => {
         card.addEventListener("dragstart", onDragStart);
@@ -575,10 +663,10 @@
         importAgentBtn.addEventListener("click", openImportModal);
       }
 
-      renderMetrics(visibleTasks);
+      renderMetrics(context);
     }
 
-    function renderCard(task) {
+    function renderCard(task, context) {
       const priority = PRIORITY_THEME[String(task.priority || "normal")] || PRIORITY_THEME.normal;
       const type = TYPE_THEME[String(task.task_type || "general")] || TYPE_THEME.general;
       const due = formatDate(task.due_date);
@@ -593,7 +681,7 @@
           ${description}
           <div class="mt-3 flex flex-wrap gap-1.5">
             <span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold" style="background:${type.color}22;border-color:${type.color}66;color:${type.color};">${type.label}</span>
-            <span class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-300">${escapeHtml(assigneeName(task))}</span>
+            <span class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-300">${escapeHtml(assigneeName(task, context))}</span>
             ${due ? `<span class="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-300">Due ${escapeHtml(due)}</span>` : ""}
           </div>
           ${dispatchError}
@@ -904,6 +992,7 @@
     }
 
     const debouncedReload = debounce(loadTasks, 250);
+    const debouncedRenderBoard = debounce(renderBoard, 80);
 
     function connectSSE() {
       if (typeof EventSource === "undefined") return;
@@ -972,7 +1061,7 @@
     ].forEach(function ([element, key]) {
       element.addEventListener("change", function () {
         state.filters[key] = element.value;
-        renderBoard();
+        debouncedRenderBoard();
       });
     });
 

@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw Mission Control Blueprint</title>
+    <meta
+      name="description"
+      content="A luxury dark/light knowledge-base and mission control website built from extracted research on OpenClaw Mission Control architecture and prompt engineering."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar glass">
+        <div>
+          <div class="eyebrow">Mission Control</div>
+          <h1>OpenClaw Blueprint</h1>
+          <p class="sidebar-copy">
+            A structured control center for architecture, prompts, design language,
+            deployment logic, and execution workflows.
+          </p>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="#overview">Overview</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#prompt-system">Prompt System</a>
+          <a href="#build-phases">Build Phases</a>
+          <a href="#design-language">Design Language</a>
+          <a href="#operator-playbook">Operator Playbook</a>
+          <a href="#prompt-library">Prompt Library</a>
+          <a href="#deployment">Deployment</a>
+          <a href="#raw-notes">Raw Notes</a>
+        </nav>
+
+        <div class="sidebar-actions">
+          <button id="themeToggle" class="button secondary" type="button">Toggle theme</button>
+          <a class="button" href="#prompt-library">Open prompt library</a>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="hero glass" id="overview">
+          <div>
+            <div class="eyebrow">Architectural Blueprint & Prompt Engineering</div>
+            <h2>
+              A luxury, operator-first website for understanding and using the
+              OpenClaw Mission Control system.
+            </h2>
+            <p class="lead">
+              This site turns the extracted PDF into a polished, easy-to-navigate
+              knowledge base with a dashboard feel: clear hierarchy, durable structure,
+              and a path from concept to deployment.
+            </p>
+          </div>
+          <div class="hero-grid">
+            <article class="metric-card">
+              <span>Core Thesis</span>
+              <strong>Stateless UI</strong>
+              <p>Mission Control is a transparent window into the local engine, not the source of truth.</p>
+            </article>
+            <article class="metric-card">
+              <span>Operator Goal</span>
+              <strong>Never Get Lost</strong>
+              <p>Every major section has an explanation, purpose, and recommended usage.</p>
+            </article>
+            <article class="metric-card">
+              <span>Design Intent</span>
+              <strong>Dark + Light</strong>
+              <p>Apple-clean surfaces merged with luxury control-center depth.</p>
+            </article>
+          </div>
+        </header>
+
+        <section class="section" id="architecture">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">01</div>
+              <h3>System Architecture</h3>
+            </div>
+            <p>
+              The extracted document frames OpenClaw as a localized orchestration layer
+              for multi-agent execution, scheduling, memory retrieval, and environment
+              monitoring.
+            </p>
+          </div>
+          <div class="card-grid two-up">
+            <article class="card glass">
+              <h4>What Mission Control Is</h4>
+              <ul>
+                <li>A visual command center for autonomous orchestration</li>
+                <li>A low-friction interface over background processes and async agents</li>
+                <li>A real-time telemetry dashboard for transparency and oversight</li>
+              </ul>
+            </article>
+            <article class="card glass">
+              <h4>What Mission Control Is Not</h4>
+              <ul>
+                <li>Not the operational database</li>
+                <li>Not a cloud-telemetry dependency</li>
+                <li>Not the engine controlling execution state</li>
+              </ul>
+            </article>
+          </div>
+          <article class="spotlight glass">
+            <h4>Thin-Layer Principle</h4>
+            <p>
+              The dashboard should stay stateless and transparent. Operational data lives
+              in the local OpenClaw engine and system files. If the UI breaks, the agent
+              continues running. That separation preserves operator sovereignty and avoids
+              coupling interface health to autonomous execution.
+            </p>
+          </article>
+        </section>
+
+        <section class="section" id="prompt-system">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">02</div>
+              <h3>Prompt System & Context Injection</h3>
+            </div>
+            <p>
+              The PDF emphasizes that OpenClaw is effective because the model is not
+              starting cold. It receives structured workspace context before each run.
+            </p>
+          </div>
+          <div class="timeline">
+            <article class="timeline-item glass">
+              <h4>Workspace Bootstrap Injection</h4>
+              <p>
+                Files like <code>AGENTS.md</code>, <code>SOUL.md</code>, <code>TOOLS.md</code>,
+                <code>IDENTITY.md</code>, and <code>USER.md</code> are concatenated into project
+                context so the agent understands role, goals, tone, and environment.
+              </p>
+            </article>
+            <article class="timeline-item glass">
+              <h4>Intentional Memory Retrieval</h4>
+              <p>
+                Daily logs are not blindly injected. Historical continuity is retrieved on
+                demand using memory tools, creating a RAG-like pattern that manages token load.
+              </p>
+            </article>
+            <article class="timeline-item glass">
+              <h4>Execution Modes</h4>
+              <p>
+                Full mode supports primary interactive work, minimal mode supports lighter
+                background jobs, and none mode supports constrained execution.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="build-phases">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">03</div>
+              <h3>Build Phases</h3>
+            </div>
+            <p>
+              The source material naturally breaks into a phased implementation path.
+              This section turns that into an actionable sequence.
+            </p>
+          </div>
+          <div class="card-grid three-up">
+            <article class="card glass">
+              <h4>Phase 1 — Preview Port & Isolation</h4>
+              <p>
+                Bind a dedicated preview port so development can be viewed safely without
+                colliding with existing tools or production flows.
+              </p>
+              <code class="inline-code">Set up a preview on port 8100.</code>
+            </article>
+            <article class="card glass">
+              <h4>Phase 2 — Ops Module</h4>
+              <p>
+                Define the Mission Control tab with the required operational streams:
+                model state, active sessions, and cron health.
+              </p>
+            </article>
+            <article class="card glass">
+              <h4>Phase 3 — Frontend Telemetry Layer</h4>
+              <p>
+                Poll the local engine, system files, or API endpoints and render state
+                changes in a React-style dashboard or static control center.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="design-language">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">04</div>
+              <h3>Design Language</h3>
+            </div>
+            <p>
+              The extracted prompts point to a specific aesthetic: clean, premium, legible,
+              and operationally calm.
+            </p>
+          </div>
+          <div class="card-grid two-up">
+            <article class="card glass">
+              <h4>Visual Rules</h4>
+              <ul>
+                <li>No emojis in the UI</li>
+                <li>Use Lucide icons or similarly clean line iconography</li>
+                <li>Apply glassmorphism sparingly for spatial hierarchy</li>
+                <li>Constrain hover states inside their containers</li>
+              </ul>
+            </article>
+            <article class="card glass">
+              <h4>Cognitive Ergonomics</h4>
+              <ul>
+                <li>Reduce operator fatigue with clear information groups</li>
+                <li>Make diagnostics visually separate from exploration</li>
+                <li>Use summary text above detail blocks</li>
+                <li>Prevent motion-heavy hover growth that destabilizes the layout</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="operator-playbook">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">05</div>
+              <h3>Operator Playbook</h3>
+            </div>
+            <p>
+              Here’s the cleanest way to use the website you asked for: top-down when you’re
+              learning, and lateral navigation when you’re executing.
+            </p>
+          </div>
+          <div class="playbook glass">
+            <div>
+              <h4>Start Here</h4>
+              <p>Read the Overview and System Architecture sections first.</p>
+            </div>
+            <div>
+              <h4>Then Map the Build</h4>
+              <p>Use Build Phases to understand sequence, dependencies, and implementation order.</p>
+            </div>
+            <div>
+              <h4>Use Prompt Library During Execution</h4>
+              <p>Copy structured prompts directly into your model or agent workflow.</p>
+            </div>
+            <div>
+              <h4>Keep Raw Notes as the Backstop</h4>
+              <p>Reference the raw note section whenever you need the original framing.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="prompt-library">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">06</div>
+              <h3>Prompt Library</h3>
+            </div>
+            <p>
+              The PDF contains both explicit prompts and implied design instructions. These
+              are organized below into reusable prompt cards.
+            </p>
+          </div>
+          <div class="prompt-grid">
+            <article class="prompt-card glass">
+              <div class="prompt-meta"><span>Network</span><button class="copy-btn" data-copy="Set up a preview on port 8100.">Copy</button></div>
+              <h4>Preview Port Setup</h4>
+              <pre>Set up a preview on port 8100.</pre>
+            </article>
+            <article class="prompt-card glass">
+              <div class="prompt-meta"><span>Core Feature</span><button class="copy-btn" data-copy="Build out a Mission Control dashboard where I can see what model we’re using, what sessions are active, and cron health. Keep it clean, premium, and easy to scan.">Copy</button></div>
+              <h4>Mission Control Definition</h4>
+              <pre>Build out a Mission Control dashboard where I can see what model we’re using,
+what sessions are active, and cron health. Keep it clean, premium, and easy to scan.</pre>
+            </article>
+            <article class="prompt-card glass">
+              <div class="prompt-meta"><span>Design</span><button class="copy-btn" data-copy="No emojis. Use Lucide icons, subtle glassmorphic effects, and keep hover outlines inside the container instead of expanding beyond it.">Copy</button></div>
+              <h4>UI Cleanup</h4>
+              <pre>No emojis. Use Lucide icons, subtle glassmorphic effects, and keep hover outlines
+inside the container instead of expanding beyond it.</pre>
+            </article>
+            <article class="prompt-card glass">
+              <div class="prompt-meta"><span>Architecture</span><button class="copy-btn" data-copy="Keep the Mission Control UI as a thin layer over the local OpenClaw engine. It should not own operational state, only reflect it clearly and safely.">Copy</button></div>
+              <h4>Thin-Layer Constraint</h4>
+              <pre>Keep the Mission Control UI as a thin layer over the local OpenClaw engine.
+It should not own operational state, only reflect it clearly and safely.</pre>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="deployment">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">07</div>
+              <h3>Deployment View</h3>
+            </div>
+            <p>
+              For your current workflow, the right first step is a public preview on the VPS,
+              then later a proper deploy once the structure and visual language are approved.
+            </p>
+          </div>
+          <div class="card-grid two-up">
+            <article class="card glass">
+              <h4>Right Now</h4>
+              <ul>
+                <li>Serve the site from a dedicated port</li>
+                <li>Expose it for browser review</li>
+                <li>Use this as the iteration loop</li>
+              </ul>
+            </article>
+            <article class="card glass">
+              <h4>Later</h4>
+              <ul>
+                <li>Add framework components if needed</li>
+                <li>Wire real telemetry endpoints</li>
+                <li>Package for permanent deployment</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="raw-notes">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">08</div>
+              <h3>Raw Notes from the Source</h3>
+            </div>
+            <p>
+              This is a distilled quote-and-summary section based on the PDF text you shared,
+              preserving the original themes without leaving them as an unreadable wall.
+            </p>
+          </div>
+          <article class="raw-notes glass">
+            <p><strong>Autonomous orchestration:</strong> the document frames OpenClaw as an always-on operating environment rather than a simple chat interface.</p>
+            <p><strong>Need for Mission Control:</strong> the dashboard exists to reduce cognitive load while preserving transparency over async work and background processes.</p>
+            <p><strong>Local sovereignty:</strong> the UI should visualize local state without exporting operational telemetry to the cloud.</p>
+            <p><strong>Prompt priming matters:</strong> the power of the system comes from structured workspace context, not one-off prompting alone.</p>
+            <p><strong>Design discipline matters:</strong> icon consistency, restrained motion, and glassmorphic layering all contribute to operator clarity.</p>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" aria-live="polite"></div>
+    <script src="./script.js"></script>
+  </body>
+</html>

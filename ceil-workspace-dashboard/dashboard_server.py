@@ -91,6 +91,17 @@ DEFAULT_PARTICIPANT_TO_SLUG = {
 }
 
 
+def validate_allowed_origin(candidate: str) -> str:
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"Invalid origin scheme for {candidate!r}; expected http or https")
+    if not parsed.netloc:
+        raise ValueError(f"Invalid origin {candidate!r}; host is required")
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        raise ValueError(f"Invalid origin {candidate!r}; origin must not include path, query, or fragment")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def parse_allowed_origins(raw: str | None) -> set[str]:
     if not raw:
         return set()
@@ -98,7 +109,7 @@ def parse_allowed_origins(raw: str | None) -> set[str]:
     for item in raw.split(","):
         candidate = item.strip()
         if candidate:
-            out.add(candidate)
+            out.add(validate_allowed_origin(candidate))
     return out
 
 
@@ -420,26 +431,31 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         # Keep request logs concise and never print headers/token values.
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
 
-    def _request_origin_fallback(self) -> str | None:
-        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host")
-        if not host:
-            return None
-        proto = self.headers.get("X-Forwarded-Proto") or "http"
-        return f"{proto}://{host}"
+    def _content_security_policy(self) -> str:
+        return "; ".join([
+            "default-src 'self'",
+            "base-uri 'self'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "img-src 'self' data: https:",
+            "font-src 'self' https://fonts.gstatic.com data:",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+            "connect-src 'self' https://fvqqejrlgsksudjlfxeh.supabase.co wss://fvqqejrlgsksudjlfxeh.supabase.co https://cdn.jsdelivr.net",
+        ])
 
     def _resolve_origin(self) -> tuple[bool, str | None]:
         origin = self.headers.get("Origin")
         if not origin:
             return False, None
+        return origin in self.allowed_origins, origin
 
-        explicit = self.allowed_origins
-        if explicit:
-            return origin in explicit, origin
-
-        fallback_origin = self._request_origin_fallback()
-        if fallback_origin and origin == fallback_origin:
-            return True, origin
-        return False, origin
+    def end_headers(self) -> None:
+        self.send_header("Content-Security-Policy", self._content_security_policy())
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        super().end_headers()
 
     def _write_json(self, status_code: int, payload: dict, add_cors: bool = True) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -865,7 +881,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "mission_control_url": self.mission_control_url,
             "config_path": self.config_path,
             "allowed_gateway_ports": sorted(self.allowed_gateway_ports),
-            "cors_mode": "explicit" if self.allowed_origins else "same-origin-fallback",
+            "cors_mode": "explicit-allowlist-only",
             "has_explicit_allowed_origins": bool(self.allowed_origins),
             "mission_control_auth": "configured" if self.mission_control_auth else "not_configured",
         }
@@ -1099,7 +1115,7 @@ def main() -> int:
     parser.add_argument(
         "--allowed-origins",
         default=os.getenv("DASHBOARD_ALLOWED_ORIGINS", ""),
-        help="Comma-separated browser origins allowed for CORS (defaults to same-origin fallback).",
+        help="Comma-separated browser origins allowed for CORS. Must be explicit http/https origins only; no forwarded-header fallback is allowed.",
     )
     parser.add_argument(
         "--allowed-gateway-ports",
@@ -1123,9 +1139,14 @@ def main() -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    try:
+        allowed_origins = parse_allowed_origins(args.allowed_origins)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     handler_cls = build_handler(args.directory)
     server = ThreadingHTTPServer((args.bind, args.port), handler_cls)
-    server.allowed_origins = parse_allowed_origins(args.allowed_origins)  # type: ignore[attr-defined]
+    server.allowed_origins = allowed_origins  # type: ignore[attr-defined]
     server.allowed_gateway_ports = allowed_ports  # type: ignore[attr-defined]
     server.config_path = args.config  # type: ignore[attr-defined]
     server.tools_url = args.tools_url  # type: ignore[attr-defined]

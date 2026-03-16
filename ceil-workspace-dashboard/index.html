@@ -14,13 +14,25 @@
     />
 
     <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      src="https://cdn.tailwindcss.com"
+      integrity="sha384-igm5BeiBt36UU4gqwWS7imYmelpTsZlQ45FZf+XBn9MuJbn4nQr7yx1yFydocC/K"
+      crossorigin="anonymous"
+    ></script>
 
     <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+      integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
+      crossorigin="anonymous"
+    ></script>
 
     <!-- Supabase JS SDK CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/dist/umd/supabase.min.js"
+      integrity="sha384-z2hqtpr/vSDZ8zSjLOiNgnR/mpU799AD93s6rvkNJLI6Hl0YlKXEhDtREzNT749S"
+      crossorigin="anonymous"
+    ></script>
 
     <!-- Supabase project config -->
     <script>
@@ -1947,6 +1959,7 @@
         buildDefaultAgentSummaries,
         summarizeAgentLogsForAgents,
         buildOrgChartStats,
+        summarizeMissionControlSnapshot,
       } = window.CeilDashboardAnalytics;
       const dashboardDom = window.CeilDashboardDom;
 
@@ -1986,6 +1999,20 @@
 
       function defaultAgentSummaries() {
         return buildDefaultAgentSummaries(CEIL_AGENTS);
+      }
+
+      async function fetchMissionControlSnapshot(workspaceId = "default") {
+        const query = `workspace_id=${encodeURIComponent(workspaceId)}`;
+        const [tasks, agents, events] = await Promise.all([
+          fetch(`/api/mission-control/api/tasks?${query}`).then((res) => res.ok ? res.json() : []).catch(() => []),
+          fetch(`/api/mission-control/api/agents?${query}`).then((res) => res.ok ? res.json() : []).catch(() => []),
+          fetch(`/api/mission-control/api/events?${query}`).then((res) => res.ok ? res.json() : []).catch(() => []),
+        ]);
+        return {
+          tasks: Array.isArray(tasks) ? tasks : [],
+          agents: Array.isArray(agents) ? agents : [],
+          events: Array.isArray(events) ? events : [],
+        };
       }
 
       function setPill(btn) {
@@ -2108,6 +2135,24 @@
           mostActive: "N/A",
           successRate: "N/A",
         };
+
+        try {
+          const snapshot = await fetchMissionControlSnapshot(window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default");
+          if (snapshot.agents.length || snapshot.tasks.length || snapshot.events.length) {
+            const summary = summarizeMissionControlSnapshot(snapshot);
+            renderAgentsView({
+              agentSummaries: summary.agentSummaries,
+              recentLogs: summary.recentLogs,
+              totalToday: summary.totalToday,
+              totalWeek: summary.totalWeek,
+              mostActive: summary.mostActive,
+              successRate: summary.successRate,
+            });
+            return;
+          }
+        } catch (error) {
+          console.warn("Mission Control agent snapshot unavailable, falling back to agent_logs:", error);
+        }
 
         if (!supabaseClient) {
           renderAgentsView(fallback);
@@ -2494,6 +2539,17 @@
           resolveAgentFromLogName,
           isCountableTask,
         });
+
+        try {
+          const snapshot = await fetchMissionControlSnapshot(window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default");
+          if (snapshot.agents.length || snapshot.tasks.length || snapshot.events.length) {
+            const orgChart = summarizeMissionControlSnapshot(snapshot);
+            renderOrg(orgChart.orgStatsByName, orgChart.orgMetrics);
+            return;
+          }
+        } catch (err) {
+          console.warn("Mission Control org snapshot unavailable, falling back to agent_logs:", err);
+        }
 
         if (!supabaseClient) {
           renderOrg(emptyOrgChart.statsByName, emptyOrgChart.metrics);
@@ -5457,6 +5513,59 @@
         };
 
         const snap = await getTodoSnapshot();
+
+        try {
+          const snapshot = await fetchMissionControlSnapshot(window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default");
+          if (snapshot.agents.length || snapshot.tasks.length || snapshot.events.length) {
+            const runtimeSummary = summarizeMissionControlSnapshot(snapshot);
+            const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
+            const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
+            const todayStartDate = new Date(startOfDayISO(0));
+            const yesterdayStartDate = new Date(startOfDayISO(-1));
+            const doneToday = tasks.filter((task) => String(task.status || "").toLowerCase() === "done" && new Date(task.updated_at || task.created_at || 0) >= todayStartDate).length;
+            const doneYesterday = tasks.filter((task) => {
+              const updatedAt = new Date(task.updated_at || task.created_at || 0);
+              return String(task.status || "").toLowerCase() === "done" && updatedAt >= yesterdayStartDate && updatedAt < todayStartDate;
+            }).length;
+            const activeAgents = agents.filter((agent) => ["active", "working", "busy", "running", "in_progress"].includes(String(agent.effective_status || agent.status || "").toLowerCase())).length;
+            const pulseCounts = fallback.pulseCounts.slice();
+            const recentCompletions = tasks
+              .filter((task) => String(task.status || "").toLowerCase() === "done")
+              .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))
+              .slice(0, 6)
+              .map((task) => ({
+                agent_name: agents.find((agent) => String(agent.id || "") === String(task.assigned_agent_id || ""))?.name || "Unknown",
+                task_description: task.title || task.description || "Completed task",
+                status: task.status || "done",
+                created_at: task.updated_at || task.created_at || null,
+              }));
+            const agentMap = Object.fromEntries(runtimeSummary.agentSummaries.filter((agent) => agent.tasksToday > 0).map((agent) => [agent.name, agent.tasksToday]));
+
+            renderQuickStats({
+              openTasks: tasks.filter((task) => !["done", "verification"].includes(String(task.status || "").toLowerCase())).length,
+              doneToday,
+              doneYesterday,
+              agentsActive: activeAgents,
+              successRate: runtimeSummary.successRate,
+            });
+            renderPulse({ labels: fallback.pulseLabels, counts: pulseCounts, todayCount: doneToday, deltaCount: doneToday - doneYesterday });
+            renderRiskBanner({
+              atRiskCount: tasks.filter((task) => ["urgent", "high"].includes(String(task.priority || "").toLowerCase()) && String(task.status || "").toLowerCase() !== "done").length,
+              doingCount: tasks.filter((task) => ["assigned", "in_progress", "testing", "review"].includes(String(task.status || "").toLowerCase())).length,
+              doingThreshold: 4,
+            });
+            renderSnapshot({
+              todo: tasks.filter((task) => ["planning", "inbox", "assigned"].includes(String(task.status || "").toLowerCase())).length,
+              doing: tasks.filter((task) => ["in_progress", "testing", "review", "verification"].includes(String(task.status || "").toLowerCase())).length,
+              done: tasks.filter((task) => String(task.status || "").toLowerCase() === "done").length,
+            });
+            renderAgentRing(agentMap);
+            renderRecentCompletions(recentCompletions);
+            return;
+          }
+        } catch (error) {
+          console.warn("Mission Control dashboard snapshot unavailable, falling back to Supabase analytics:", error);
+        }
 
         if (!supabaseClient) {
           renderQuickStats({ openTasks: snap.todo + snap.doing, doneToday: 0, doneYesterday: 0, agentsActive: 0, successRate: "N/A" });

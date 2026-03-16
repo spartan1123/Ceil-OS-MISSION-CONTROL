@@ -167,6 +167,31 @@ test('buildOrgChartStats keeps housekeeping out of totals and leaves zero-task a
 });
 
 
+test('summarizeMissionControlSnapshot rolls up live runtime agents, tasks, and events', () => {
+  const summary = analytics.summarizeMissionControlSnapshot({
+    agents: [
+      { id: 'agent-1', name: 'Senku Ishigami', role: 'Scientific Execution', effective_status: 'active', model: 'gpt-live' },
+      { id: 'agent-2', name: 'Workspace Manager', role: 'Primary Coordinator', effective_status: 'standby' },
+    ],
+    tasks: [
+      { id: 'task-1', title: 'Live gateway mission', assigned_agent_id: 'agent-1', status: 'in_progress', updated_at: '2026-03-08T10:00:00Z' },
+      { id: 'task-2', title: 'Completed gateway mission', assigned_agent_id: 'agent-2', status: 'done', updated_at: '2026-03-08T11:00:00Z' },
+    ],
+    events: [
+      { id: 'evt-1', agent_id: 'agent-1', message: 'senku-ishigami active on runtime', created_at: '2026-03-08T10:05:00Z', metadata: { model: 'gpt-live' } },
+    ],
+    now: new Date('2026-03-08T12:00:00Z'),
+  });
+
+  assert.equal(summary.totalToday, 1);
+  assert.equal(summary.totalWeek, 2);
+  assert.equal(summary.successfulWeek, 1);
+  assert.equal(summary.successRate, '50.0%');
+  assert.equal(summary.mostActive, 'Senku Ishigami (1)');
+  assert.equal(summary.orgMetrics.activeToday, 1);
+  assert.equal(summary.agentSummaries[0].latest.task_description, 'Live gateway mission');
+});
+
 test('completion-like statuses stay countable across analytics rollups', () => {
   const summary = analytics.summarizeAgentLogsForAgents({
     agents: AGENTS,
