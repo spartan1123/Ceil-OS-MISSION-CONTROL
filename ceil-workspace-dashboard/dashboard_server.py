@@ -13,10 +13,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
@@ -66,6 +66,8 @@ DEFAULT_MISSION_CONTROL_ENV_PATH = "/root/.openclaw/workspace/autensa/.env.local
 DEFAULT_COUNCIL_ARTIFACT_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.council-artifacts"
 DEFAULT_NATIVE_STATE_PATH = "/root/.openclaw/workspace/ceil-workspace-dashboard/.native-dashboard/state.json"
 DEFAULT_ALLOWED_GATEWAY_PORTS = {18789, 19001, 19011, 19031, 19051, 19081, 19091, 19101, 19111}
+DEFAULT_SUPABASE_URL = "https://fvqqejrlgsksudjlfxeh.supabase.co"
+DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2cXFlanJsZ3Nrc3VkamxmeGVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1OTA1OTksImV4cCI6MjA4ODE2NjU5OX0.q_i7ShnJ5j0OPNOBjUQaaHeMqrnS_W70zmjMPAz_jYo"
 DEFAULT_PORT_CONFIG_MAP = {
     18789: "/root/.openclaw/openclaw.json",
     19001: "/root/.openclaw/instances/workspace-manager.json",
@@ -215,6 +217,109 @@ def load_mission_control_auth(
     if basic_user and basic_pass:
         auth["basic"] = base64.b64encode(f"{basic_user}:{basic_pass}".encode("utf-8")).decode("ascii")
     return auth
+
+
+def supabase_headers(api_key: str) -> dict[str, str]:
+    return {
+        "apikey": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    }
+
+
+def fetch_supabase_rows(base_url: str, api_key: str, table: str, *, select: str, filters: list[str] | None = None, order: str | None = None, limit: int | None = None) -> list[dict[str, object]]:
+    query_parts = [f"select={quote(select, safe=',*()')}" ]
+    for item in filters or []:
+        query_parts.append(item)
+    if order:
+        query_parts.append(f"order={quote(order, safe='.:,_')}" )
+    if limit is not None:
+        query_parts.append(f"limit={int(limit)}")
+    url = f"{base_url.rstrip('/')}/rest/v1/{table}?{'&'.join(query_parts)}"
+    req = urllib.request.Request(url, headers=supabase_headers(api_key))
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Unexpected Supabase response for {table}")
+    return payload
+
+
+def is_completed_like_status(value: object) -> bool:
+    status = str(value or "").strip().lower()
+    return status in {"done", "completed", "complete", "success", "succeeded", "resolved", "closed", "finished", "verification"}
+
+
+def day_start_utc(offset_days: int = 0) -> datetime:
+    now = datetime.now(UTC)
+    start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    return start + timedelta(days=offset_days)
+
+
+def week_start_utc() -> datetime:
+    today = day_start_utc(0)
+    return today - timedelta(days=today.weekday())
+
+
+def summarize_dashboard_rows(rows: list[dict[str, object]], open_tasks_count: int) -> dict[str, object]:
+    today_start = day_start_utc(0)
+    yesterday_start = day_start_utc(-1)
+    week_start = week_start_utc()
+    day_starts = [day_start_utc(-offset) for offset in range(6, -1, -1)]
+
+    done_today_count = 0
+    done_yesterday_count = 0
+    active_agents: set[str] = set()
+    week_total = 0
+    week_success = 0
+    pulse_counts = [0] * 7
+    recent_completions: list[dict[str, object]] = []
+
+    sorted_rows = sorted(rows, key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    for row in sorted_rows:
+        created_raw = row.get("created_at")
+        try:
+            created_at = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00")) if created_raw else None
+        except ValueError:
+            created_at = None
+        if created_at is None:
+            continue
+        if created_at >= today_start:
+            agent_name = str(row.get("agent_name") or "").strip().lower()
+            if agent_name:
+                active_agents.add(agent_name)
+            if is_completed_like_status(row.get("status")):
+                done_today_count += 1
+                if len(recent_completions) < 10:
+                    recent_completions.append({
+                        "agent_name": row.get("agent_name") or "Unknown",
+                        "task_description": row.get("task_description") or "Completed task",
+                        "status": row.get("status") or "done",
+                        "created_at": created_raw,
+                    })
+        elif yesterday_start <= created_at < today_start and is_completed_like_status(row.get("status")):
+            done_yesterday_count += 1
+
+        if created_at >= week_start:
+            week_total += 1
+            if is_completed_like_status(row.get("status")):
+                week_success += 1
+
+        for index, start in enumerate(day_starts):
+            end = day_starts[index + 1] if index < 6 else day_start_utc(1)
+            if start <= created_at < end and is_completed_like_status(row.get("status")):
+                pulse_counts[index] += 1
+                break
+
+    success_rate = f"{((week_success / week_total) * 100):.1f}%" if week_total > 0 else "N/A"
+    return {
+        "open_tasks_count": open_tasks_count,
+        "done_today_count": done_today_count,
+        "done_yesterday_count": done_yesterday_count,
+        "active_agents_count": len(active_agents),
+        "success_rate": success_rate,
+        "recent_completions": recent_completions,
+        "pulse_counts": pulse_counts,
+    }
 
 
 def find_config_for_port(default_config_path: str, port: int) -> str:
@@ -482,6 +587,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     @property
     def mission_control_auth(self) -> dict[str, str]:
         return self.server.mission_control_auth  # type: ignore[attr-defined]
+
+    @property
+    def supabase_url(self) -> str:
+        return self.server.supabase_url  # type: ignore[attr-defined]
+
+    @property
+    def supabase_anon_key(self) -> str:
+        return self.server.supabase_anon_key  # type: ignore[attr-defined]
 
     def _invoke_runtime_tool(self, tool: str, action: str | None, args: dict | None = None, *, port: int = 18789) -> dict[str, object] | None:
         payload: dict[str, object] = {"tool": tool}
@@ -772,6 +885,23 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/business-os/provisioning-runs":
             business_os_id = parse_qs(parsed.query or "").get("business_os_id", [None])[0]
             self._write_json(200, {"items": self.native_store.list_provisioning_runs(business_os_id)})
+            return True
+        if path == "/api/dashboard/summary":
+            try:
+                rows = fetch_supabase_rows(
+                    self.supabase_url,
+                    self.supabase_anon_key,
+                    "agent_logs",
+                    select="agent_name,task_description,status,created_at",
+                    filters=[f"created_at=gte.{quote(day_start_utc(-6).isoformat().replace('+00:00', 'Z'), safe=':-TZ')}"],
+                    order="created_at.desc",
+                    limit=2000,
+                )
+                runtime_snapshot = build_runtime_snapshot(self.native_store, self._runtime_sessions(), workspace_id)
+                open_tasks_count = sum(1 for task in runtime_snapshot["tasks"] if str(task.get("status") or "").lower() not in {"done", "verification"})
+                self._write_json(200, summarize_dashboard_rows(rows, open_tasks_count))
+            except Exception as exc:  # pylint: disable=broad-except
+                self._write_json(500, {"ok": False, "error": {"type": "server_error", "message": f"Dashboard summary failed: {exc}"}})
             return True
         return False
 
@@ -1158,6 +1288,8 @@ def main() -> int:
         os.getenv("MC_BASIC_AUTH_USER"),
         os.getenv("MC_BASIC_AUTH_PASS"),
     )
+    server.supabase_url = os.getenv("SUPABASE_URL", DEFAULT_SUPABASE_URL)  # type: ignore[attr-defined]
+    server.supabase_anon_key = os.getenv("SUPABASE_ANON_KEY", DEFAULT_SUPABASE_ANON_KEY)  # type: ignore[attr-defined]
     server.council_event_bus = CouncilEventBus()  # type: ignore[attr-defined]
     server.native_store = NativeDashboardStore(args.native_state_path)  # type: ignore[attr-defined]
     server.council_orchestrator = CouncilOrchestrator(  # type: ignore[attr-defined]
