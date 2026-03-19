@@ -80,7 +80,8 @@
 
   function filterTasks(tasks, filters) {
     return tasks.filter((task) => {
-      if (isSyntheticRuntimeTask(task)) return false;
+      // NOTE: Runtime/synthetic tasks are now shown as they represent live agent activity
+      // if (isSyntheticRuntimeTask(task)) return false;
       if (filters.assignee && String(task.assigned_agent_id || "") !== filters.assignee) return false;
       if (filters.priority && String(task.priority || "") !== filters.priority) return false;
       if (filters.status && String(task.status || "") !== filters.status) return false;

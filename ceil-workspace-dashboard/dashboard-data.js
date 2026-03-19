@@ -82,11 +82,22 @@
       }
 
       function agentMeta(name) {
-        if (typeof resolveAgentFromLogName === "function") {
-          const resolved = resolveAgentFromLogName(name);
+        const resolver = typeof resolveAgentFromLogName === "function"
+          ? resolveAgentFromLogName
+          : (typeof window !== "undefined" && typeof window.resolveAgentFromLogName === "function"
+              ? window.resolveAgentFromLogName
+              : null);
+        if (resolver) {
+          const resolved = resolver(name);
           if (resolved) return resolved;
         }
-        return CEIL_AGENTS.find(a => normalizeAgentName(a.name) === normalizeAgentName(name));
+        const agents = typeof CEIL_AGENTS !== "undefined"
+          ? CEIL_AGENTS
+          : (typeof window !== "undefined" && Array.isArray(window.CEIL_AGENTS) ? window.CEIL_AGENTS : []);
+        const normalizer = typeof normalizeAgentName === "function"
+          ? normalizeAgentName
+          : ((value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase());
+        return agents.find(a => normalizer(a.name) === normalizer(name));
       }
 
       function agentColor(name) {

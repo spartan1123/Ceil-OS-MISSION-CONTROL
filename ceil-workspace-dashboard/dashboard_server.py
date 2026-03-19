@@ -316,8 +316,10 @@ def summarize_dashboard_rows(rows: list[dict[str, object]], open_tasks_count: in
         "done_today_count": done_today_count,
         "done_yesterday_count": done_yesterday_count,
         "active_agents_count": len(active_agents),
+        "success_rate_pct": success_rate,
         "success_rate": success_rate,
         "recent_completions": recent_completions,
+        "pulse_7day": pulse_counts,
         "pulse_counts": pulse_counts,
     }
 

@@ -275,28 +275,6 @@
 
       // ── Main load ──────────────────────────────────────────────────────────
       async function loadDashboard() {
-        // ── Static todos data (no supabase needed for snapshot) ──
-        // Pull from Kanban state if available, else query supabase
-        async function getTodoSnapshot() {
-          // Try window.allTasks from kanban (if loaded)
-          // Otherwise fall back to fresh supabase query
-          if (supabaseClient) {
-            const { data, error } = await supabaseClient
-              .from("todos")
-              .select("status, track_status")
-              .limit(500);
-            if (!error && data) {
-              const todo  = data.filter(t => t.status === "todo").length;
-              const doing = data.filter(t => t.status === "in_progress").length;
-              const done  = data.filter(t => t.status === "done").length;
-              const atRisk = data.filter(t => t.track_status === "At Risk").length;
-              return { todo, doing, done, atRisk };
-            }
-          }
-          return { todo: 0, doing: 0, done: 0, atRisk: 0 };
-        }
-
-        // ── Build last 7 days labels ──
         function last7DayLabels() {
           const labels = [];
           for (let i = 6; i >= 0; i--) {
@@ -308,204 +286,119 @@
         }
 
         const fallback = {
-          openTasks: 0, doneToday: 0, doneYesterday: 0,
-          agentsActive: 0, successRate: "N/A",
+          openTasks: 0,
+          doneToday: 0,
+          doneYesterday: 0,
+          agentsActive: 0,
+          successRate: "N/A",
           pulseLabels: last7DayLabels(),
-          pulseCounts: [0,0,0,0,0,0,0],
-          todayPulseCount: 0, deltaPulse: 0,
-          atRiskCount: 0, doingCount: 0,
-          todo: 0, doing: 0, done: 0,
-          agentMap: {},
+          pulseCounts: [0, 0, 0, 0, 0, 0, 0],
           recentCompletions: [],
+          agentMap: {},
         };
 
-        const snap = await getTodoSnapshot();
-
         try {
-          const snapshot = await fetchMissionControlSnapshot(window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default");
-          if (snapshot.agents.length || snapshot.tasks.length || snapshot.events.length) {
-            const runtimeSummary = summarizeMissionControlSnapshot(snapshot);
-            const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
-            const agents = Array.isArray(snapshot.agents) ? snapshot.agents : [];
-            const todayStartDate = new Date(startOfDayISO(0));
-            const yesterdayStartDate = new Date(startOfDayISO(-1));
-            const doneToday = tasks.filter((task) => String(task.status || "").toLowerCase() === "done" && new Date(task.updated_at || task.created_at || 0) >= todayStartDate).length;
-            const doneYesterday = tasks.filter((task) => {
-              const updatedAt = new Date(task.updated_at || task.created_at || 0);
-              return String(task.status || "").toLowerCase() === "done" && updatedAt >= yesterdayStartDate && updatedAt < todayStartDate;
-            }).length;
-            const activeAgents = agents.filter((agent) => ["active", "working", "busy", "running", "in_progress"].includes(String(agent.effective_status || agent.status || "").toLowerCase())).length;
-            const pulseCounts = fallback.pulseCounts.slice();
-            const recentCompletions = tasks
-              .filter((task) => String(task.status || "").toLowerCase() === "done")
-              .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))
-              .slice(0, 6)
-              .map((task) => ({
-                agent_name: agents.find((agent) => String(agent.id || "") === String(task.assigned_agent_id || ""))?.name || "Unknown",
-                task_description: task.title || task.description || "Completed task",
-                status: task.status || "done",
-                created_at: task.updated_at || task.created_at || null,
-              }));
-            const agentMap = Object.fromEntries(runtimeSummary.agentSummaries.filter((agent) => agent.tasksToday > 0).map((agent) => [agent.name, agent.tasksToday]));
-
-            renderQuickStats({
-              openTasks: tasks.filter((task) => !["done", "verification"].includes(String(task.status || "").toLowerCase())).length,
-              doneToday,
-              doneYesterday,
-              agentsActive: activeAgents,
-              successRate: runtimeSummary.successRate,
-            });
-            renderPulse({ labels: fallback.pulseLabels, counts: pulseCounts, todayCount: doneToday, deltaCount: doneToday - doneYesterday });
-            renderRiskBanner({
-              atRiskCount: tasks.filter((task) => ["urgent", "high"].includes(String(task.priority || "").toLowerCase()) && String(task.status || "").toLowerCase() !== "done").length,
-              doingCount: tasks.filter((task) => ["assigned", "in_progress", "testing", "review"].includes(String(task.status || "").toLowerCase())).length,
-              doingThreshold: 4,
-            });
-            renderSnapshot({
-              todo: tasks.filter((task) => ["planning", "inbox", "assigned"].includes(String(task.status || "").toLowerCase())).length,
-              doing: tasks.filter((task) => ["in_progress", "testing", "review", "verification"].includes(String(task.status || "").toLowerCase())).length,
-              done: tasks.filter((task) => String(task.status || "").toLowerCase() === "done").length,
-            });
-            renderAgentRing(agentMap);
-            renderRecentCompletions(recentCompletions);
-            return;
+          if (typeof window.fetchMissionControlSnapshot !== "function") {
+            throw new Error("Mission Control snapshot helper unavailable");
           }
-        } catch (error) {
-          console.warn("Mission Control dashboard snapshot unavailable, falling back to Supabase analytics:", error);
-        }
 
-        if (!supabaseClient) {
-          renderQuickStats({ openTasks: snap.todo + snap.doing, doneToday: 0, doneYesterday: 0, agentsActive: 0, successRate: "N/A" });
-          renderPulse({ labels: fallback.pulseLabels, counts: fallback.pulseCounts, todayCount: 0, deltaCount: 0 });
-          renderRiskBanner({ atRiskCount: snap.atRisk, doingCount: snap.doing, doingThreshold: 4 });
-          renderSnapshot({ todo: snap.todo, doing: snap.doing, done: snap.done });
-          renderAgentRing({});
-          renderRecentCompletions([]);
-          return;
-        }
+          const snapshot = await window.fetchMissionControlSnapshot(window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default");
+          const tasks = Array.isArray(snapshot?.tasks) ? snapshot.tasks : [];
+          const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
+          const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
 
-        try {
-          const todayStart     = startOfDayISO(0);
-          const yesterdayStart = startOfDayISO(-1);
-          const weekStart      = startOfWeekISO();
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const yesterdayStart = new Date(todayStart);
+          yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          const weekStart = new Date(todayStart);
+          const day = weekStart.getDay();
+          const mondayOffset = day === 0 ? 6 : day - 1;
+          weekStart.setDate(weekStart.getDate() - mondayOffset);
 
-          // Build 7-day window starts
-          const dayStarts = [];
-          for (let i = 6; i >= 0; i--) {
-            const d = new Date();
-            d.setHours(0,0,0,0);
-            d.setDate(d.getDate() - i);
-            dayStarts.push(d.toISOString());
-          }
-          const sevenDaysAgo = dayStarts[0];
-
-          const [
-            weekSuccessRes,
-            weekTotalRes,
-            recentLogsRes,
-            sevenDayLogsRes,
-          ] = await Promise.all([
-            supabaseClient
-              .from("agent_logs")
-              .select("*", { count: "exact", head: true })
-              .gte("created_at", weekStart)
-              .or(getCompletedLikeStatusOrClause("status")),
-            supabaseClient
-              .from("agent_logs")
-              .select("*", { count: "exact", head: true })
-              .gte("created_at", weekStart),
-            supabaseClient
-              .from("agent_logs")
-              .select("agent_name, task_description, status, created_at")
-              .gte("created_at", todayStart)
-              .order("created_at", { ascending: false })
-              .limit(100),
-            supabaseClient
-              .from("agent_logs")
-              .select("agent_name, status, created_at")
-              .gte("created_at", sevenDaysAgo)
-              .order("created_at", { ascending: false })
-              .limit(2000),
-          ]);
-
-          const logs7day       = sevenDayLogsRes.data || [];
-          const logsToday      = recentLogsRes.data || [];
-
-          // Pulse: count completeds per day
-          const pulseCounts = dayStarts.map((start, idx) => {
-            const end = idx < 6 ? dayStarts[idx + 1] : new Date(start).getTime() + 86400000;
-            return logs7day.filter(l =>
-              isCompletedLikeStatus(l.status) &&
-              new Date(l.created_at) >= new Date(start) &&
-              new Date(l.created_at) < new Date(end)
-            ).length;
+          const openTasks = tasks.filter((task) => !["done", "verification"].includes(String(task.status || "").toLowerCase())).length;
+          const doneToday = tasks.filter((task) => {
+            const updated = new Date(task.updated_at || task.created_at || 0);
+            return !Number.isNaN(updated.getTime()) && updated >= todayStart && String(task.status || "").toLowerCase() === "done";
+          }).length;
+          const doneYesterday = tasks.filter((task) => {
+            const updated = new Date(task.updated_at || task.created_at || 0);
+            return !Number.isNaN(updated.getTime()) && updated >= yesterdayStart && updated < todayStart && String(task.status || "").toLowerCase() === "done";
+          }).length;
+          const agentsActive = agents.filter((agent) => {
+            const status = String(agent.effective_status || agent.status || "").toLowerCase();
+            return ["active", "working", "busy", "running", "in_progress"].includes(status);
+          }).length;
+          const weekTasks = tasks.filter((task) => {
+            const updated = new Date(task.updated_at || task.created_at || 0);
+            return !Number.isNaN(updated.getTime()) && updated >= weekStart;
           });
+          const completedWeekTasks = weekTasks.filter((task) => String(task.status || "").toLowerCase() === "done").length;
+          const successRate = weekTasks.length > 0
+            ? `${((completedWeekTasks / weekTasks.length) * 100).toFixed(1)}%`
+            : "N/A";
 
-          const todayPulseCount     = pulseCounts[6];
-          const yesterdayPulseCount = pulseCounts[5];
+          const recentCompletions = events
+            .filter((event) => event && (event.message || event.type))
+            .slice(0, 6)
+            .map((event) => ({
+              agent_name: event.agent_name || "Unknown Agent",
+              task_description: event.message || event.type || "Mission event",
+              created_at: event.created_at || null,
+            }));
 
-          // Done tasks today (completed in agent_logs)
-          const doneToday     = logsToday.filter(l => isCompletedLikeStatus(l.status)).length;
-          // Done yesterday
-          const yesterdayLogs = logs7day.filter(l => {
-            const t = new Date(l.created_at);
-            return t >= new Date(dayStarts[5]) && t < new Date(dayStarts[6]);
+          const agentMap = tasks.reduce((acc, task) => {
+            const assignedId = String(task.assigned_agent_id || "");
+            const agent = agents.find((item) => String(item.id || "") === assignedId);
+            const key = agent?.name || "Unknown";
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {});
+
+          const countsByDay = new Array(7).fill(0);
+          tasks.forEach((task) => {
+            if (String(task.status || "").toLowerCase() !== "done") return;
+            const updated = new Date(task.updated_at || task.created_at || 0);
+            if (Number.isNaN(updated.getTime())) return;
+            const dayStart = new Date(updated);
+            dayStart.setHours(0, 0, 0, 0);
+            const diffDays = Math.floor((todayStart.getTime() - dayStart.getTime()) / 86400000);
+            if (diffDays >= 0 && diffDays < 7) {
+              countsByDay[6 - diffDays] += 1;
+            }
           });
-          const doneYesterday = yesterdayLogs.filter(l => isCompletedLikeStatus(l.status)).length;
-
-          // Agents active today (distinct agent names)
-          const agentsToday = new Set(logsToday.map(l => l.agent_name?.toLowerCase().trim()).filter(Boolean));
-
-          // Agent activity map (all 7-day logs today)
-          const agentMap = {};
-          for (const l of logsToday) {
-            const k = l.agent_name || "Unknown";
-            agentMap[k] = (agentMap[k] || 0) + 1;
-          }
-
-          // Success rate
-          const totalWeek   = weekTotalRes.count || 0;
-          const successWeek = weekSuccessRes.count || 0;
-          const successRate = totalWeek > 0 ? `${((successWeek / totalWeek) * 100).toFixed(1)}%` : "N/A";
-
-          // Recent completions
-          const recentCompletions = logsToday
-            .filter(l => isCompletedLikeStatus(l.status))
-            .slice(0, 6);
 
           renderQuickStats({
-            openTasks:    snap.todo + snap.doing,
+            openTasks,
             doneToday,
             doneYesterday,
-            agentsActive: agentsToday.size,
+            agentsActive,
             successRate,
           });
-
           renderPulse({
-            labels:       last7DayLabels(),
-            counts:       pulseCounts,
-            todayCount:   todayPulseCount,
-            deltaCount:   todayPulseCount - yesterdayPulseCount,
+            labels: fallback.pulseLabels,
+            counts: countsByDay,
+            todayCount: doneToday,
+            deltaCount: doneToday - doneYesterday,
           });
-
-          renderRiskBanner({
-            atRiskCount:    snap.atRisk,
-            doingCount:     snap.doing,
-            doingThreshold: 4,
-          });
-
-          renderSnapshot({ todo: snap.todo, doing: snap.doing, done: snap.done });
+          renderRiskBanner({ atRiskCount: 0, doingCount: 0, doingThreshold: 4 });
+          renderSnapshot({ todo: openTasks, doing: 0, done: doneToday });
           renderAgentRing(agentMap);
           renderRecentCompletions(recentCompletions);
-
         } catch (err) {
           console.error("Dashboard load failed:", err);
-          renderQuickStats({ openTasks: snap.todo + snap.doing, doneToday: 0, doneYesterday: 0, agentsActive: 0, successRate: "N/A" });
+          renderQuickStats({
+            openTasks: fallback.openTasks,
+            doneToday: fallback.doneToday,
+            doneYesterday: fallback.doneYesterday,
+            agentsActive: fallback.agentsActive,
+            successRate: fallback.successRate,
+          });
           renderPulse({ labels: fallback.pulseLabels, counts: fallback.pulseCounts, todayCount: 0, deltaCount: 0 });
-          renderRiskBanner({ atRiskCount: snap.atRisk, doingCount: snap.doing, doingThreshold: 4 });
-          renderSnapshot({ todo: snap.todo, doing: snap.doing, done: snap.done });
-          renderAgentRing({});
-          renderRecentCompletions([]);
+          renderRiskBanner({ atRiskCount: 0, doingCount: 0, doingThreshold: 4 });
+          renderSnapshot({ todo: 0, doing: 0, done: 0 });
+          renderAgentRing(fallback.agentMap);
+          renderRecentCompletions(fallback.recentCompletions);
         }
       }
 

@@ -33,7 +33,7 @@
     <!-- Supabase project config -->
     <script>
       window.SUPABASE_URL = "https://fvqqejrlgsksudjlfxeh.supabase.co";
-      window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2cXFlanJsZ3Nrc3VkamxmeGVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1OTA1OTksImV4cCI6MjA4ODE2NjU5OX0.q_i7ShnJ5j0OPNOBjUQaaHeMqrnS_W70zmjMPAz_jYo";
+      window.SUPABASE_ANON_KEY = "sb_publishable_aRibS1wJZr5sUBOJzmwAkQ_lRXCMbH5";
     </script>
 
     <script>
@@ -1804,7 +1804,7 @@
     <script src="./dashboard-utils.js"></script>
     <script src="./dashboard-analytics.js"></script>
     <script src="./dashboard-dom.js"></script>
-    <script src="./dashboard-mission-queue.js?v=2"></script>
+    <script src="./dashboard-mission-queue.js"></script>
     <script>
       // Supabase shell initialization (safe and non-blocking for UI)
       const SUPABASE_URL = window.SUPABASE_URL || "YOUR_SUPABASE_URL";
@@ -1972,6 +1972,16 @@
       }
 
       const { lookup: AGENT_LOOKUP, aliasIndex: AGENT_ALIAS_INDEX, resolveAgentFromLogName, getAgentMeta } = createAgentResolver(CEIL_AGENTS);
+      window.CEIL_AGENTS = CEIL_AGENTS;
+      window.resolveAgentFromLogName = resolveAgentFromLogName;
+      window.getAgentMeta = getAgentMeta;
+      window.fetchMissionControlSnapshot = fetchMissionControlSnapshot;
+      window.buildOrgChartStats = buildOrgChartStats;
+      window.summarizeMissionControlSnapshot = summarizeMissionControlSnapshot;
+      window.isCountableTask = isCountableTask;
+      window.startOfTodayISO = startOfTodayISO;
+      window.startOfWeekISO = startOfWeekISO;
+      window.getCompletedLikeStatusOrClause = getCompletedLikeStatusOrClause;
 
       const nav = document.getElementById("tab-nav");
       const tabPill = document.getElementById("tab-pill");
@@ -1996,6 +2006,24 @@
       const agentCardsGridEl = document.getElementById("agents-card-grid");
       const recentActivityEl = document.getElementById("recent-activity-list");
       const modelUsageBodyEl = document.getElementById("model-usage-body");
+
+      // Dashboard panel stat elements
+      const dsOpenTasksEl = document.getElementById("ds-open-tasks");
+      const dsOpenTasksSubEl = document.getElementById("ds-open-tasks-sub");
+      const dsDoneTodayEl = document.getElementById("ds-done-today");
+      const dsDoneTodayDeltaEl = document.getElementById("ds-done-today-delta");
+      const dsAgentsActiveEl = document.getElementById("ds-agents-active");
+      const dsSuccessRateEl = document.getElementById("ds-success-rate");
+      const snapTodoEl = document.getElementById("snap-todo");
+      const snapDoingEl = document.getElementById("snap-doing");
+      const snapDoneEl = document.getElementById("snap-done");
+      const snapPctEl = document.getElementById("snap-pct");
+      const snapProgressBarEl = document.getElementById("snap-progress-bar");
+      const agentActivityRingEl = document.getElementById("agent-activity-ring");
+      const riskBannerListEl = document.getElementById("risk-banner-list");
+      const riskAllClearEl = document.getElementById("risk-all-clear");
+      const pulseTodayBadgeEl = document.getElementById("pulse-today-badge");
+      const pulseDeltaBadgeEl = document.getElementById("pulse-delta-badge");
 
       function defaultAgentSummaries() {
         return buildDefaultAgentSummaries(CEIL_AGENTS);
@@ -2126,6 +2154,184 @@
         );
       }
 
+      // Update Dashboard panel stats with Mission Control data
+      function updateDashboardStats(tasks, agents) {
+        console.log("[Dashboard] updateDashboardStats called:", { tasks: tasks?.length, agents: agents?.length });
+        if (!Array.isArray(tasks) || !Array.isArray(agents)) {
+          console.warn("[Dashboard] Invalid data passed to updateDashboardStats");
+          return;
+        }
+
+        const dayStart = new Date();
+        dayStart.setHours(0, 0, 0, 0);
+
+        const yesterdayStart = new Date(dayStart);
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+        // Calculate task stats
+        const doneToday = tasks.filter(t => {
+          const updated = new Date(t.updated_at || t.created_at || 0);
+          return t.status === "done" && updated >= dayStart;
+        }).length;
+
+        const doneYesterday = tasks.filter(t => {
+          const updated = new Date(t.updated_at || t.created_at || 0);
+          return t.status === "done" && updated >= yesterdayStart && updated < dayStart;
+        }).length;
+
+        const openTasks = tasks.filter(t => !["done", "verification"].includes(t.status)).length;
+        const inProgressTasks = tasks.filter(t => ["in_progress", "testing", "review"].includes(t.status)).length;
+
+        // Calculate agent stats
+        const activeAgents = agents.filter(a => {
+          const status = String(a.effective_status || a.status || "").toLowerCase();
+          return ["active", "working", "busy", "running", "in_progress"].includes(status);
+        }).length;
+
+        // Calculate success rate using the same weekly logic as the Agents view
+        const weekStart = new Date(dayStart);
+        const day = weekStart.getDay();
+        const mondayOffset = day === 0 ? 6 : day - 1;
+        weekStart.setDate(weekStart.getDate() - mondayOffset);
+
+        const weekTasks = tasks.filter(t => {
+          const updated = new Date(t.updated_at || t.created_at || 0);
+          return !Number.isNaN(updated.getTime()) && updated >= weekStart;
+        });
+        const completedWeekTasks = weekTasks.filter(t => String(t.status || "").toLowerCase() === "done").length;
+        const successRate = weekTasks.length > 0
+          ? `${((completedWeekTasks / weekTasks.length) * 100).toFixed(1)}%`
+          : "N/A";
+
+        // Update DOM elements
+        if (dsOpenTasksEl) dsOpenTasksEl.textContent = openTasks;
+        if (dsOpenTasksSubEl) dsOpenTasksSubEl.textContent = `${inProgressTasks} in progress`;
+        if (dsDoneTodayEl) dsDoneTodayEl.textContent = doneToday;
+        if (dsDoneTodayDeltaEl) {
+          const delta = doneToday - doneYesterday;
+          if (delta > 0) {
+            dsDoneTodayDeltaEl.textContent = `+${delta} vs yesterday`;
+            dsDoneTodayDeltaEl.className = "mt-0.5 text-[11px] text-emerald-400";
+          } else if (delta < 0) {
+            dsDoneTodayDeltaEl.textContent = `${delta} vs yesterday`;
+            dsDoneTodayDeltaEl.className = "mt-0.5 text-[11px] text-rose-400";
+          } else {
+            dsDoneTodayDeltaEl.textContent = "same as yesterday";
+            dsDoneTodayDeltaEl.className = "mt-0.5 text-[11px] text-slate-400";
+          }
+        }
+        if (dsAgentsActiveEl) dsAgentsActiveEl.textContent = activeAgents;
+        if (dsSuccessRateEl) dsSuccessRateEl.textContent = successRate;
+
+        // Update Today's Snapshot
+        const todoTasks = tasks.filter(t => ["planning", "inbox"].includes(t.status)).length;
+        const doingTasks = tasks.filter(t => ["assigned", "in_progress", "testing", "review"].includes(t.status)).length;
+        const snapDoneTasks = tasks.filter(t => t.status === "done").length;
+        const totalSnap = todoTasks + doingTasks + snapDoneTasks || 1;
+        const progressPct = Math.round(((todoTasks + doingTasks + snapDoneTasks) > 0 ? (snapDoneTasks / totalSnap) * 100 : 0));
+
+        if (snapTodoEl) snapTodoEl.textContent = todoTasks;
+        if (snapDoingEl) snapDoingEl.textContent = doingTasks;
+        if (snapDoneEl) snapDoneEl.textContent = snapDoneTasks;
+        if (snapPctEl) snapPctEl.textContent = `${progressPct}%`;
+        if (snapProgressBarEl) snapProgressBarEl.style.width = `${progressPct}%`;
+
+        // Update Agent Activity Ring
+        if (agentActivityRingEl) {
+          const agentTaskCounts = {};
+          tasks.forEach(t => {
+            if (t.assigned_agent_id) {
+              agentTaskCounts[t.assigned_agent_id] = (agentTaskCounts[t.assigned_agent_id] || 0) + 1;
+            }
+          });
+
+          const sortedAgents = agents
+            .map(a => ({ ...a, taskCount: agentTaskCounts[a.id] || 0 }))
+            .sort((a, b) => b.taskCount - a.taskCount)
+            .slice(0, 5);
+
+          if (sortedAgents.length === 0) {
+            agentActivityRingEl.innerHTML = '<div class="text-xs text-slate-500">No active agents</div>';
+          } else {
+            const AGENT_EMOJI_MAP = {
+              "workspace orchestrator": "🧭",
+              "ceil": "👾",
+              "senku ishigami": "🧪",
+              "provisioning architect": "🏗️",
+              "reliability / sre": "🛰️",
+              "reliability sre": "🛰️",
+              "quality auditor": "✅",
+              "os monitor": "🖥️",
+              "research search": "🔍",
+              "ariana": "🌟",
+              "workspace manager": "📋",
+            };
+            const maxTasks = Math.max(...sortedAgents.map(a => a.taskCount), 1);
+            agentActivityRingEl.innerHTML = sortedAgents.map(agent => {
+              const pct = (agent.taskCount / maxTasks) * 100;
+              const nameKey = String(agent.name || "").toLowerCase().trim();
+              const emoji = AGENT_EMOJI_MAP[nameKey] || agent.emoji || agent.avatar_emoji || "🤖";
+              return `
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">${emoji}</span>
+                  <div class="flex-1">
+                    <div class="flex justify-between text-xs mb-1">
+                      <span class="text-slate-300">${escapeHtml(agent.name || "Unknown")}</span>
+                      <span class="text-slate-400">${agent.taskCount}</span>
+                    </div>
+                    <div class="h-1.5 w-full rounded-full bg-slate-700/60">
+                      <div class="h-1.5 rounded-full bg-gradient-to-r from-violet-500 to-cyan-400" style="width:${pct}%"></div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("");
+          }
+        }
+
+        // Update Risk Banner
+        const stuckTasks = tasks.filter(t => {
+          const updated = new Date(t.updated_at || t.created_at || 0);
+          const hoursSinceUpdate = (Date.now() - updated.getTime()) / (1000 * 60 * 60);
+          return t.status === "in_progress" && hoursSinceUpdate > 24;
+        });
+        const errorTasks = tasks.filter(t => t.planning_dispatch_error);
+
+        if (riskBannerListEl) {
+          const risks = [];
+          if (errorTasks.length > 0) {
+            risks.push(`<div class="rounded-lg border border-rose-400/25 bg-rose-950/35 px-3 py-2 text-rose-200">⚠️ ${errorTasks.length} task${errorTasks.length === 1 ? "" : "s"} with dispatch errors</div>`);
+          }
+          if (stuckTasks.length > 0) {
+            risks.push(`<div class="rounded-lg border border-amber-400/25 bg-amber-950/35 px-3 py-2 text-amber-200">⏱️ ${stuckTasks.length} task${stuckTasks.length === 1 ? "" : "s"} stuck >24h</div>`);
+          }
+          if (risks.length === 0) {
+            riskBannerListEl.innerHTML = "";
+            if (riskAllClearEl) riskAllClearEl.classList.remove("hidden");
+          } else {
+            riskBannerListEl.innerHTML = risks.join("");
+            if (riskAllClearEl) riskAllClearEl.classList.add("hidden");
+          }
+        }
+
+        // Update Pulse Badges
+        if (pulseTodayBadgeEl) {
+          pulseTodayBadgeEl.textContent = `${doneToday} today`;
+          pulseTodayBadgeEl.className = "rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200";
+        }
+        if (pulseDeltaBadgeEl && doneYesterday > 0) {
+          const deltaPct = Math.round(((doneToday - doneYesterday) / doneYesterday) * 100);
+          const sign = deltaPct >= 0 ? "+" : "";
+          pulseDeltaBadgeEl.textContent = `${sign}${deltaPct}% vs yest`;
+          pulseDeltaBadgeEl.className = deltaPct >= 0
+            ? "rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200"
+            : "rounded-full border border-rose-400/40 bg-rose-500/15 px-2.5 py-1 text-[11px] font-semibold text-rose-200";
+        } else if (pulseDeltaBadgeEl) {
+          pulseDeltaBadgeEl.textContent = "no data";
+          pulseDeltaBadgeEl.className = "rounded-full border border-slate-400/40 bg-slate-500/15 px-2.5 py-1 text-[11px] font-semibold text-slate-300";
+        }
+      }
+
       async function loadAgentData() {
         const fallback = {
           agentSummaries: defaultAgentSummaries(),
@@ -2138,6 +2344,9 @@
 
         try {
           const snapshot = await fetchMissionControlSnapshot(window.CEIL_MISSION_QUEUE_WORKSPACE_ID || "default");
+          console.log("[Dashboard] Mission Control data:", { tasks: snapshot.tasks.length, agents: snapshot.agents.length, events: snapshot.events.length });
+          // Update Dashboard panel with live data
+          updateDashboardStats(snapshot.tasks, snapshot.agents);
           if (snapshot.agents.length || snapshot.tasks.length || snapshot.events.length) {
             const summary = summarizeMissionControlSnapshot(snapshot);
             renderAgentsView({
@@ -2151,7 +2360,7 @@
             return;
           }
         } catch (error) {
-          console.warn("Mission Control agent snapshot unavailable, falling back to agent_logs:", error);
+          console.warn("[Dashboard] Mission Control agent snapshot unavailable, falling back to agent_logs:", error);
         }
 
         if (!supabaseClient) {
@@ -2279,11 +2488,9 @@
         successRate: "N/A",
       });
 
+      // Load dashboard data immediately on page load
+      loadAgentData();
       setupAgentRealtime();
-      scheduleAgentRefresh();
-
-      setupAgentRealtime();
-      scheduleAgentRefresh();
     </script>
 
     <!-- ═══════════════════════════════════════════════════
@@ -2622,17 +2829,17 @@
     <!-- ═══════════════════════════════════════════════════
          BUSINESS OS SCRIPT
     ═══════════════════════════════════════════════════ -->
-        <script src="./dashboard-core.js" integrity="sha384-WC6ILuJOFhGkAckrZwjo92v68gFM78xDWuMpKX8mvGEa4P6g0G1cfjFgAaPbf8yk" crossorigin="anonymous"></script>
+        <script src="./dashboard-core.js"></script>
 
     <!-- ═══════════════════════════════════════════════════
          COUNCIL SCRIPT
     ═══════════════════════════════════════════════════ -->
-        <script src="./dashboard-data.js" integrity="sha384-1FTzinY3SGQW0iI0+fF8z62VXfPtkvn8KnHPybWB1gJoAMbss5U5rOYIzrHil61o" crossorigin="anonymous"></script>
+        <script src="./dashboard-data.js"></script>
 
     <!-- ═══════════════════════════════════════════════════
          DASHBOARD SCRIPT
     ═══════════════════════════════════════════════════ -->
-        <script src="./dashboard-ui.js" integrity="sha384-Uvy5/iQPybOGcC6DnTUu2fBD4NVLUzCNKEUB/IVQOC/kLDbXYA+eh7yRHx728EYH" crossorigin="anonymous"></script>
+        <script src="./dashboard-ui.js"></script>
 
     <script>
       window.CeilMissionQueue && window.CeilMissionQueue.init({

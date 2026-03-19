@@ -146,14 +146,35 @@
     const mondayOffset = day === 0 ? 6 : day - 1;
     weekStart.setDate(weekStart.getDate() - mondayOffset);
 
-    const agentSummaries = safeAgents.map((agent, index) => ({
-      ...agent,
-      emoji: agent.emoji || agent.avatar_emoji || "🤖",
-      color: agent.color || ["#4F46E5", "#EC4899", "#06B6D4", "#10B981", "#7C3AED", "#F59E0B", "#3B82F6"][index % 7],
-      subtitle: agent.subtitle || agent.role || agent.description || "Mission specialist",
-      latest: null,
-      tasksToday: 0,
-    }));
+    // Map agent names to unique emojis
+    const AGENT_EMOJI_MAP = {
+      "workspace orchestrator": "🧭",
+      "ceil": "👾",
+      "senku ishigami": "🧪",
+      "provisioning architect": "🏗️",
+      "reliability / sre": "🛰️",
+      "reliability sre": "🛰️",
+      "quality auditor": "✅",
+      "os monitor": "🖥️",
+      "research search": "🔍",
+      "ariana": "🌟",
+      "workspace manager": "📋",
+    };
+
+    const agentSummaries = safeAgents.map((agent, index) => {
+      const nameKey = String(agent.name || "").toLowerCase().trim();
+      const mappedEmoji = AGENT_EMOJI_MAP[nameKey];
+      const colors = ["#4F46E5", "#EC4899", "#06B6D4", "#10B981", "#7C3AED", "#F59E0B", "#3B82F6", "#F472B6", "#14B8A6"];
+      
+      return {
+        ...agent,
+        emoji: mappedEmoji || agent.emoji || agent.avatar_emoji || "🤖",
+        color: agent.color || colors[index % colors.length],
+        subtitle: agent.subtitle || agent.role || agent.description || "Mission specialist",
+        latest: null,
+        tasksToday: 0,
+      };
+    });
     const summaryById = new Map(agentSummaries.map((agent) => [String(agent.id || ""), agent]));
 
     for (const task of safeTasks) {

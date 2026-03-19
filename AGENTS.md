@@ -117,6 +117,23 @@ Reactions are lightweight social signals. Humans use them constantly — they sa
 
 Skills provide your tools. When you need one, check its `SKILL.md`. Keep local notes (camera names, SSH details, voice preferences) in `TOOLS.md`.
 
+## Supabase Activity Logging
+
+**Status:** ✅ Active (credentials verified 2026-03-16)
+- Endpoint: `https://fvqqejrlgsudjlfxeh.supabase.co`
+- Table: `agent_logs`
+- Credential path: `/root/.openclaw/.secrets/supabase.env`
+
+**Logging gate:** All significant agent activity must be logged to `agent_logs` before final replies. Use REST API via curl or supabase-js client.
+
+**Schema:**
+- `agent_name` - Canonical agent identifier
+- `task_description` - Activity summary
+- `model_used` - Model alias (e.g., `kimi-coding/k2p5`)
+- `status` - `success`, `error`, `pending`
+- `created_at` - Auto-generated timestamp
+- `run_id` - Optional correlation ID
+
 ## Ceil Agent Router (Main Session)
 
 I am the always-available top-level orchestrator for Ceil Workspace OS work.
